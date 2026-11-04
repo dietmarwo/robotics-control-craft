@@ -1,12 +1,28 @@
 use crate::{Evaluation, Failure, Work, infeasible, invalid};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 pub const CAPABILITIES: &[&str] = &[
     "bounded_mass_spring_damper",
     "piecewise_constant_actuation",
     "sampled_pd",
     "scenario_replay",
 ];
+
+/// Diagnostics of a complete rollout. The fields are declared in alphabetical
+/// order, the key order of a `serde_json::Value` map, so records keep their bytes.
+#[derive(Serialize)]
+pub struct Metrics {
+    integrated_error: f64,
+    integrated_force_squared: f64,
+    max_abs_force_n: f64,
+    max_abs_position_m: f64,
+    terminal_position_m: f64,
+    terminal_velocity_m_s: f64,
+    trace: Value,
+    trace_columns: [&'static str; 4],
+}
+
+const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -270,11 +286,15 @@ fn lanes(
         done[l].take().unwrap_or_else(|| {
             let terminal = (x[l] - target).powi(2) + 0.1 * v[l].powi(2);
             let score = terminal + error[l] / m.horizon_s + 0.001 * effort[l];
-            let metrics = work.metrics(|| {
-                json!({
-        "terminal_position_m":x[l],"terminal_velocity_m_s":v[l],"integrated_error":error[l],
-        "integrated_force_squared":effort[l],"max_abs_position_m":max_abs_x[l],"max_abs_force_n":max_force[l],
-        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":None::<Vec<[f64; 4]>>})
+            let metrics = work.metrics(|| Metrics {
+                integrated_error: error[l],
+                integrated_force_squared: effort[l],
+                max_abs_force_n: max_force[l],
+                max_abs_position_m: max_abs_x[l],
+                terminal_position_m: x[l],
+                terminal_velocity_m_s: v[l],
+                trace: Value::Null,
+                trace_columns: TRACE_COLUMNS,
             });
             (Ok((score, metrics)), work.used)
         })
@@ -347,11 +367,15 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
     let terminal = (y[0] - m.target_m).powi(2) + 0.1 * y[1].powi(2);
     Ok((
         terminal + y[2] / m.horizon_s + 0.001 * effort,
-        work.metrics(|| {
-            json!({
-        "terminal_position_m":y[0],"terminal_velocity_m_s":y[1],"integrated_error":y[2],
-        "integrated_force_squared":effort,"max_abs_position_m":max_abs_x,"max_abs_force_n":max_force,
-        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":TRACE.then_some(trace)})
+        work.metrics(|| Metrics {
+            integrated_error: y[2],
+            integrated_force_squared: effort,
+            max_abs_force_n: max_force,
+            max_abs_position_m: max_abs_x,
+            terminal_position_m: y[0],
+            terminal_velocity_m_s: y[1],
+            trace: json!(TRACE.then_some(trace)),
+            trace_columns: TRACE_COLUMNS,
         }),
     ))
 }
@@ -412,7 +436,11 @@ mod tests {
                 let text = |r: &[(Evaluation, u64); LANES]| {
                     r.iter()
                         .map(|(e, s)| match e {
-                            Ok((score, metrics)) => format!("{s} {:x} {metrics}", score.to_bits()),
+                            Ok((score, metrics)) => format!(
+                                "{s} {:x} {}",
+                                score.to_bits(),
+                                serde_json::to_string(metrics).unwrap()
+                            ),
                             Err(f) => format!("{s} {} {}", f.status, f.detail),
                         })
                         .collect::<Vec<_>>()

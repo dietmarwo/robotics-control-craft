@@ -79,3 +79,21 @@ check passes. Otherwise revert it and record it under `rejected/`.
   multiply, add and divide latency). The round therefore also widens
   `domain::LANES` from four to eight, for both builds. The target
   workload and the decision rule are unchanged.
+
+### Round 4: typed metrics records
+
+- Target workload: `serial` (96 full records, 62 steps each, one
+  worker), round 3 binary before, round 4 binary after, full mode.
+- Profile after round 3 (`serial` full, callgrind): string serialization
+  13%, allocation and free about 22%, `BTreeMap` inserts 5%, the lane
+  kernel 11%. Most of this is the per-record metrics `Value` map: eight
+  owned key strings, a four-string column list and boxed numbers.
+- Change: the domain returns a typed `Metrics` struct that serializes
+  directly. Its fields are declared in alphabetical order, the order a
+  `serde_json::Value` map produces, so the JSON bytes are unchanged. The
+  optional trace stays a `Value` in this round. Failure metrics keep the
+  `Value` form behind an untagged enum.
+- Expected effect: 1.3x to 1.6x on `serial` full; small gains on `one`
+  and the full domain workloads.
+- Floating-point results: unchanged (same kernel; serde_json formats the
+  same `f64` values with the same formatter).

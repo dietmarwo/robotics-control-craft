@@ -14,7 +14,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub type Evaluation = Result<(f64, Value), Failure>;
+/// A domain result: objective and optional typed metrics, or a classified failure.
+pub(crate) type Evaluation = Result<(f64, Option<domain::Metrics>), Failure>;
 
 #[derive(Debug, Clone)]
 pub struct Failure {
@@ -80,12 +81,11 @@ pub struct Work<'a> {
     metrics_enabled: bool,
 }
 impl Work<'_> {
-    pub fn metrics(&self, make: impl FnOnce() -> Value) -> Value {
-        if self.metrics_enabled {
-            make()
-        } else {
-            Value::Null
-        }
+    pub(crate) fn metrics(
+        &self,
+        make: impl FnOnce() -> domain::Metrics,
+    ) -> Option<domain::Metrics> {
+        self.metrics_enabled.then(make)
     }
 
     #[inline]
@@ -125,13 +125,21 @@ impl Work<'_> {
     }
 }
 
+/// Record metrics: typed domain metrics for complete rows, JSON for failures.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum RecordMetrics {
+    Domain(domain::Metrics),
+    Json(Value),
+}
+
 #[derive(Serialize)]
 struct Record<'a> {
     id: &'a str,
     status: &'static str,
     steps: u64,
     score: Option<f64>,
-    metrics: Option<Value>,
+    metrics: Option<RecordMetrics>,
     detail: Option<String>,
 }
 
@@ -362,7 +370,7 @@ impl Prepared {
                 status: "complete",
                 steps,
                 score: Some(score),
-                metrics: Some(metrics),
+                metrics: metrics.map(RecordMetrics::Domain),
                 detail: None,
             },
             Err(e) => Record {
@@ -370,7 +378,11 @@ impl Prepared {
                 status: e.status,
                 steps,
                 score: None,
-                metrics: if metrics_enabled { e.metrics } else { None },
+                metrics: if metrics_enabled {
+                    e.metrics.map(RecordMetrics::Json)
+                } else {
+                    None
+                },
                 detail: Some(e.detail),
             },
         }
@@ -826,6 +838,36 @@ mod tests {
             statuses,
             ["complete", "infeasible", "complete", "infeasible"]
         );
+    }
+
+    #[test]
+    fn metrics_keys_keep_sorted_json_order() {
+        let example = fixture();
+        let prepared = Prepared::new(&example["model"].to_string()).unwrap();
+        for trace in [false, true] {
+            let candidates = json!([{"id":"a","parameters":example["parameters"],"trace":trace}]);
+            let text = prepared
+                .evaluate_json(&candidates.to_string(), "{}")
+                .unwrap();
+            let keys = [
+                "integrated_error",
+                "integrated_force_squared",
+                "max_abs_force_n",
+                "max_abs_position_m",
+                "terminal_position_m",
+                "terminal_velocity_m_s",
+                "trace",
+                "trace_columns",
+            ];
+            let positions: Vec<_> = keys
+                .iter()
+                .map(|k| text.find(&format!("\"{k}\":")).unwrap())
+                .collect();
+            assert!(positions.windows(2).all(|w| w[0] < w[1]), "{text}");
+            let value: Value = serde_json::from_str(&text).unwrap();
+            let metrics = serde_json::to_string(&value["records"][0]["metrics"]).unwrap();
+            assert!(text.contains(&metrics), "{text}");
+        }
     }
 
     #[test]
