@@ -97,3 +97,18 @@ check passes. Otherwise revert it and record it under `rejected/`.
   and the full domain workloads.
 - Floating-point results: unchanged (same kernel; serde_json formats the
   same `f64` values with the same formatter).
+
+### Round 5: typed trace output
+
+- Target workload: `trace` (12 traced full records, 62 steps each, one
+  worker), round 4 binary before, round 5 binary after, full mode.
+- Profile after round 3 (`trace`, callgrind): float formatting 24%,
+  `Value` serialization 13%, allocation and free about 12%, `Value` drop
+  6%, `to_value` of trace rows 5%, the scalar kernel 8%.
+- Change: store the trace as `Option<Vec<[f64; 4]>>` in `Metrics` and
+  serialize it directly, instead of converting it into a `Value` tree of
+  arrays. Reserve the trace vector for the expected step count (capped
+  at the 10,000-step trace limit) to avoid repeated growth.
+- Expected effect: 1.3x to 1.6x on `trace` (float formatting remains).
+- Floating-point results: unchanged; the same `f64` values go through
+  the same formatter.

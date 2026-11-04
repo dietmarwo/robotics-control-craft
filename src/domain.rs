@@ -1,6 +1,5 @@
 use crate::{Evaluation, Failure, Work, infeasible, invalid};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 pub const CAPABILITIES: &[&str] = &[
     "bounded_mass_spring_damper",
     "piecewise_constant_actuation",
@@ -18,9 +17,12 @@ pub struct Metrics {
     max_abs_position_m: f64,
     terminal_position_m: f64,
     terminal_velocity_m_s: f64,
-    trace: Value,
+    trace: Option<Vec<[f64; 4]>>,
     trace_columns: [&'static str; 4],
 }
+
+/// Most trace rows a traced candidate may produce.
+const TRACE_LIMIT: usize = 10_000;
 
 const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
 
@@ -293,7 +295,7 @@ fn lanes(
                 max_abs_position_m: max_abs_x[l],
                 terminal_position_m: x[l],
                 terminal_velocity_m_s: v[l],
-                trace: Value::Null,
+                trace: None,
                 trace_columns: TRACE_COLUMNS,
             });
             (Ok((score, metrics)), work.used)
@@ -301,12 +303,25 @@ fn lanes(
     })
 }
 
+/// Upper estimate of a rollout's steps: grid steps plus one per control boundary.
+fn expected_steps(m: &Model) -> usize {
+    let boundaries = match &m.control {
+        Control::Held { switches_s } => switches_s.len() as f64,
+        Control::Pd { interval_s } => m.horizon_s / interval_s,
+    };
+    (m.horizon_s / m.dt_s + boundaries + 2.0) as usize
+}
+
 fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'_>) -> Evaluation {
     let fmax = m.force_limit_n;
     let mut t = 0.0_f64;
     let mut y = [m.initial_x_m, m.initial_v_m_s, 0.0];
     let mut effort = 0.0_f64;
-    let mut trace = Vec::new();
+    let mut trace = if TRACE {
+        Vec::with_capacity(expected_steps(m).min(TRACE_LIMIT))
+    } else {
+        Vec::new()
+    };
     let mut max_abs_x = y[0].abs();
     let mut max_force = 0.0_f64;
     let mut segment = 0usize;
@@ -355,7 +370,7 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
             if max_abs_x > m.position_limit_m {
                 return Err(infeasible("position limit exceeded"));
             }
-            if TRACE && trace.len() == 10_000 {
+            if TRACE && trace.len() == TRACE_LIMIT {
                 return Err(invalid("trace requires at most 10,000 integration steps"));
             }
             if TRACE {
@@ -374,7 +389,7 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
             max_abs_position_m: max_abs_x,
             terminal_position_m: y[0],
             terminal_velocity_m_s: y[1],
-            trace: json!(TRACE.then_some(trace)),
+            trace: TRACE.then_some(trace),
             trace_columns: TRACE_COLUMNS,
         }),
     ))

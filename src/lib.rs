@@ -871,6 +871,43 @@ mod tests {
     }
 
     #[test]
+    fn traced_rollouts_stop_after_the_trace_limit() {
+        let example = fixture();
+        let mut model = example["model"].clone();
+        model["dt_s"] = json!(1e-4);
+        let prepared = Prepared::new(&model.to_string()).unwrap();
+        let rows = json!([
+            {"id": "traced", "parameters": example["parameters"], "trace": true},
+            {"id": "untraced", "parameters": example["parameters"]},
+        ]);
+        let out: Value =
+            serde_json::from_str(&prepared.evaluate_json(&rows.to_string(), "{}").unwrap())
+                .unwrap();
+        let traced = &out["records"][0];
+        assert_eq!(traced["status"], "invalid");
+        assert_eq!(traced["steps"], 10_001);
+        assert_eq!(
+            traced["detail"],
+            "trace requires at most 10,000 integration steps"
+        );
+        assert_eq!(out["records"][1]["status"], "complete");
+        let short = json!([{"id": "t", "parameters": example["parameters"], "trace": true}]);
+        let out: Value = serde_json::from_str(
+            &Prepared::new(&example["model"].to_string())
+                .unwrap()
+                .evaluate_json(&short.to_string(), "{}")
+                .unwrap(),
+        )
+        .unwrap();
+        let trace = out["records"][0]["metrics"]["trace"].as_array().unwrap();
+        assert_eq!(
+            trace.len() as u64,
+            out["records"][0]["steps"].as_u64().unwrap()
+        );
+        assert_eq!(trace.last().unwrap()[0], example["model"]["horizon_s"]);
+    }
+
+    #[test]
     fn score_matrix_rejects_bad_shapes_and_budgets() {
         let example = fixture();
         let prepared = Prepared::new(&example["model"].to_string()).unwrap();
