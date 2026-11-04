@@ -1,0 +1,73 @@
+From 096de3837b9464147c4b721306b62704abbdba33 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 4 Nov 2026 02:54:35 +0100
+Subject: [PATCH 10/12] Complete domain performance iteration 9
+
+---
+ src/domain.rs | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/src/domain.rs b/src/domain.rs
+index 73ab2c5..6eb1607 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -92,7 +92,8 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+         _ => {}
+     }
+     let mut t = 0.0_f64;
+-    let mut y = [m.initial_x_m, m.initial_v_m_s, 0.0, 0.0];
++    let mut y = [m.initial_x_m, m.initial_v_m_s, 0.0];
++    let mut effort = 0.0_f64;
+     let mut trace = Vec::new();
+     let mut max_abs_x = y[0].abs();
+     let mut max_force = 0.0_f64;
+@@ -109,12 +110,14 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+             ),
+         };
+         max_force = max_force.max(force.abs());
+-        let derivative = |s: [f64; 4]| {
++        let force_squared = force * force;
++        let force_weight =
++            force_squared + 2.0 * force_squared + 2.0 * force_squared + force_squared;
++        let derivative = |s: [f64; 3]| {
+             [
+                 s[1],
+                 (force - m.spring_n_per_m * s[0] - m.damping_ns_per_m * s[1]) * m.inverse_mass,
+                 (s[0] - m.target_m).powi(2),
+-                force * force,
+             ]
+         };
+         while t < boundary {
+@@ -128,12 +131,13 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+             let b = derivative(std::array::from_fn(|i| y[i] + 0.5 * h * a[i]));
+             let d = derivative(std::array::from_fn(|i| y[i] + 0.5 * h * b[i]));
+             let e = derivative(std::array::from_fn(|i| y[i] + h * d[i]));
+-            for i in 0..4 {
++            for i in 0..3 {
+                 y[i] += h * (a[i] + 2.0 * b[i] + 2.0 * d[i] + e[i]) / 6.0;
+             }
++            effort += h * force_weight / 6.0;
+             t = next;
+             max_abs_x = max_abs_x.max(y[0].abs());
+-            if y.iter().any(|v| !v.is_finite()) {
++            if !effort.is_finite() || y.iter().any(|v| !v.is_finite()) {
+                 return Err(invalid("nonfinite trajectory"));
+             }
+             if max_abs_x > m.position_limit_m {
+@@ -150,11 +154,11 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+     }
+     let terminal = (y[0] - m.target_m).powi(2) + 0.1 * y[1].powi(2);
+     Ok((
+-        terminal + y[2] / m.horizon_s + 0.001 * y[3],
++        terminal + y[2] / m.horizon_s + 0.001 * effort,
+         work.metrics(|| {
+             json!({
+         "terminal_position_m":y[0],"terminal_velocity_m_s":y[1],"integrated_error":y[2],
+-        "integrated_force_squared":y[3],"max_abs_position_m":max_abs_x,"max_abs_force_n":max_force,
++        "integrated_force_squared":effort,"max_abs_position_m":max_abs_x,"max_abs_force_n":max_force,
+         "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":c.trace.then_some(trace)})
+         }),
+     ))
+-- 
+2.51.1
+

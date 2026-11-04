@@ -1,0 +1,68 @@
+From a4b32da0a4aef70ee512078c759c0fd852d72a87 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 4 Nov 2026 02:55:00 +0100
+Subject: [PATCH 11/12] Specialize traced and untraced integration
+
+---
+ src/domain.rs | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/src/domain.rs b/src/domain.rs
+index 6eb1607..cea474d 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -91,6 +91,15 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+         }
+         _ => {}
+     }
++    if c.trace {
++        integrate::<true>(m, &c.parameters, work)
++    } else {
++        integrate::<false>(m, &c.parameters, work)
++    }
++}
++
++fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'_>) -> Evaluation {
++    let fmax = m.force_limit_n;
+     let mut t = 0.0_f64;
+     let mut y = [m.initial_x_m, m.initial_v_m_s, 0.0];
+     let mut effort = 0.0_f64;
+@@ -102,11 +111,11 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+         let (boundary, force) = match &m.control {
+             Control::Held { switches_s } => (
+                 switches_s.get(segment).copied().unwrap_or(m.horizon_s),
+-                c.parameters[segment],
++                parameters[segment],
+             ),
+             Control::Pd { interval_s } => (
+                 ((segment + 1) as f64 * interval_s).min(m.horizon_s),
+-                (c.parameters[0] * (m.target_m - y[0]) - c.parameters[1] * y[1]).clamp(-fmax, fmax),
++                (parameters[0] * (m.target_m - y[0]) - parameters[1] * y[1]).clamp(-fmax, fmax),
+             ),
+         };
+         max_force = max_force.max(force.abs());
+@@ -143,10 +152,10 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+             if max_abs_x > m.position_limit_m {
+                 return Err(infeasible("position limit exceeded"));
+             }
+-            if c.trace && trace.len() == 10_000 {
++            if TRACE && trace.len() == 10_000 {
+                 return Err(invalid("trace requires at most 10,000 integration steps"));
+             }
+-            if c.trace {
++            if TRACE {
+                 trace.push([t, y[0], y[1], force]);
+             }
+         }
+@@ -159,7 +168,7 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+             json!({
+         "terminal_position_m":y[0],"terminal_velocity_m_s":y[1],"integrated_error":y[2],
+         "integrated_force_squared":effort,"max_abs_position_m":max_abs_x,"max_abs_force_n":max_force,
+-        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":c.trace.then_some(trace)})
++        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":TRACE.then_some(trace)})
+         }),
+     ))
+ }
+-- 
+2.51.1
+

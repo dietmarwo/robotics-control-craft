@@ -1,0 +1,51 @@
+From d4f579b49551026e76c7bcd1d72b27d714fb6228 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 4 Nov 2026 02:52:32 +0100
+Subject: [PATCH 09/12] Prepare reciprocal mass for RK4 stages
+
+---
+ src/domain.rs | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/domain.rs b/src/domain.rs
+index 9b4fa10..73ab2c5 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -12,6 +12,8 @@ pub const CAPABILITIES: &[&str] = &[
+ #[serde(deny_unknown_fields)]
+ pub struct Model {
+     mass_kg: f64,
++    #[serde(skip)]
++    inverse_mass: f64,
+     spring_n_per_m: f64,
+     damping_ns_per_m: f64,
+     initial_x_m: f64,
+@@ -30,7 +32,7 @@ enum Control {
+     Pd { interval_s: f64 },
+ }
+ 
+-pub fn prepare(model: Model) -> Result<Model, String> {
++pub fn prepare(mut model: Model) -> Result<Model, String> {
+     if !(0.001..=1e4).contains(&model.mass_kg)
+         || !(0.0..=1e5).contains(&model.spring_n_per_m)
+         || !(0.0..=1e5).contains(&model.damping_ns_per_m)
+@@ -65,6 +67,7 @@ pub fn prepare(model: Model) -> Result<Model, String> {
+         }
+         _ => {}
+     }
++    model.inverse_mass = 1.0 / model.mass_kg;
+     Ok(model)
+ }
+ 
+@@ -109,7 +112,7 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+         let derivative = |s: [f64; 4]| {
+             [
+                 s[1],
+-                (force - m.spring_n_per_m * s[0] - m.damping_ns_per_m * s[1]) / m.mass_kg,
++                (force - m.spring_n_per_m * s[0] - m.damping_ns_per_m * s[1]) * m.inverse_mass,
+                 (s[0] - m.target_m).powi(2),
+                 force * force,
+             ]
+-- 
+2.51.1
+
