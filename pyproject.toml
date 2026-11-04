@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin==1.9.6"]
+build-backend = "maturin"
+
+[project]
+name = "robotics-control-craft"
+version = "0.3.0"
+requires-python = ">=3.10"
+description = "Prepared robotics-control-craft research evaluations"
+
+[tool.maturin]
+module-name = "robotics_control_craft._native"
+python-source = "python"
+features = ["python"]
+include = [
+  { path = "models/*.json", format = "sdist" },
+  { path = "docs/*.md", format = "sdist" },
+  { path = "validation/*.py", format = "sdist" },
+]

@@ -1,0 +1,810 @@
+{
+  "host": "2 vCPUs, Intel(R) Xeon(R) Processor @ 2.10GHz (KVM), Rust 1.97.0, lane kernel avx512f with 16 lanes",
+  "method": "cargo test --release --locked --lib breakdown -- --ignored --nocapture, three runs; each cell is the median over runs of per-run medians (about 0.25 s of calls per cell)",
+  "median": {
+    "domain": {
+      "full": {
+        "decode_us": 10.501,
+        "encode_us": 15.06,
+        "evaluate_us": 603.682,
+        "iterations": 361,
+        "total_us": 630.25
+      },
+      "lean": {
+        "decode_us": 11.215,
+        "encode_us": 3.511,
+        "evaluate_us": 616.841,
+        "iterations": 386,
+        "total_us": 634.226
+      },
+      "matrix": {
+        "iterations": 412,
+        "total_us": 645.894
+      },
+      "rows": 48,
+      "workers": 1
+    },
+    "domain2": {
+      "full": {
+        "decode_us": 11.918,
+        "encode_us": 13.977,
+        "evaluate_us": 611.2869999999999,
+        "iterations": 385,
+        "total_us": 638.8910000000001
+      },
+      "lean": {
+        "decode_us": 12.744,
+        "encode_us": 3.421,
+        "evaluate_us": 586.013,
+        "iterations": 418,
+        "total_us": 603.253
+      },
+      "matrix": {
+        "iterations": 428,
+        "total_us": 600.8679999999999
+      },
+      "rows": 48,
+      "workers": 1
+    },
+    "invalid": {
+      "full": {
+        "decode_us": 924.4989999999999,
+        "encode_us": 55.738,
+        "evaluate_us": 85.01,
+        "iterations": 214,
+        "total_us": 1070.517
+      },
+      "lean": {
+        "decode_us": 954.2520000000001,
+        "encode_us": 58.132,
+        "evaluate_us": 87.298,
+        "iterations": 236,
+        "total_us": 1101.266
+      },
+      "matrix": {
+        "iterations": 7232,
+        "total_us": 26.750999999999998
+      },
+      "rows": 1024,
+      "workers": 1
+    },
+    "lane_kernel": "avx512f, 16 lanes",
+    "lane_width": 16,
+    "one": {
+      "full": {
+        "decode_us": 0.268,
+        "encode_us": 0.384,
+        "evaluate_us": 2.12,
+        "iterations": 15383,
+        "total_us": 2.786
+      },
+      "lean": {
+        "decode_us": 0.255,
+        "encode_us": 0.14600000000000002,
+        "evaluate_us": 2.115,
+        "iterations": 20001,
+        "total_us": 2.531
+      },
+      "matrix": {
+        "iterations": 20001,
+        "total_us": 2.093
+      },
+      "rows": 1,
+      "workers": 1
+    },
+    "parallel": {
+      "full": {
+        "decode_us": 23.264999999999997,
+        "encode_us": 31.758000000000003,
+        "evaluate_us": 131.898,
+        "iterations": 417,
+        "total_us": 189.21
+      },
+      "lean": {
+        "decode_us": 22.402,
+        "encode_us": 9.268,
+        "evaluate_us": 115.821,
+        "iterations": 1196,
+        "total_us": 149.755
+      },
+      "matrix": {
+        "iterations": 1713,
+        "total_us": 119.183
+      },
+      "rows": 96,
+      "workers": 4
+    },
+    "serial": {
+      "full": {
+        "decode_us": 15.357,
+        "encode_us": 25.25,
+        "evaluate_us": 34.56,
+        "iterations": 2083,
+        "total_us": 75.19
+      },
+      "lean": {
+        "decode_us": 15.384,
+        "encode_us": 5.2059999999999995,
+        "evaluate_us": 32.072,
+        "iterations": 3515,
+        "total_us": 53.516
+      },
+      "matrix": {
+        "iterations": 7410,
+        "total_us": 28.985
+      },
+      "rows": 96,
+      "workers": 1
+    },
+    "trace": {
+      "full": {
+        "decode_us": 3.1310000000000002,
+        "encode_us": 82.235,
+        "evaluate_us": 28.680999999999997,
+        "iterations": 1803,
+        "total_us": 117.812
+      },
+      "rows": 12,
+      "workers": 1
+    },
+    "worker_scaling": {
+      "domain": {
+        "full_workers_1": {
+          "iterations": 376,
+          "total_us": 657.7589999999999
+        },
+        "full_workers_2": {
+          "iterations": 323,
+          "total_us": 478.056
+        },
+        "full_workers_4": {
+          "iterations": 467,
+          "total_us": 523.895
+        },
+        "matrix_workers_1": {
+          "iterations": 398,
+          "total_us": 629.291
+        },
+        "matrix_workers_2": {
+          "iterations": 615,
+          "total_us": 448.488
+        },
+        "matrix_workers_4": {
+          "iterations": 545,
+          "total_us": 460.429
+        }
+      },
+      "serial": {
+        "full_workers_1": {
+          "iterations": 2402,
+          "total_us": 82.50999999999999
+        },
+        "full_workers_2": {
+          "iterations": 693,
+          "total_us": 123.04500000000002
+        },
+        "full_workers_4": {
+          "iterations": 1336,
+          "total_us": 189.643
+        },
+        "matrix_workers_1": {
+          "iterations": 5363,
+          "total_us": 29.128
+        },
+        "matrix_workers_2": {
+          "iterations": 2495,
+          "total_us": 66.333
+        },
+        "matrix_workers_4": {
+          "iterations": 2502,
+          "total_us": 111.03999999999999
+        }
+      }
+    }
+  },
+  "runs": [
+    {
+      "domain": {
+        "full": {
+          "decode_us": 10.055,
+          "encode_us": 14.292,
+          "evaluate_us": 591.22,
+          "iterations": 361,
+          "total_us": 615.42
+        },
+        "lean": {
+          "decode_us": 10.360000000000001,
+          "encode_us": 3.267,
+          "evaluate_us": 581.5319999999999,
+          "iterations": 386,
+          "total_us": 596.265
+        },
+        "matrix": {
+          "iterations": 412,
+          "total_us": 645.894
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "domain2": {
+        "full": {
+          "decode_us": 11.658,
+          "encode_us": 13.635000000000002,
+          "evaluate_us": 597.828,
+          "iterations": 385,
+          "total_us": 624.35
+        },
+        "lean": {
+          "decode_us": 12.347000000000001,
+          "encode_us": 3.375,
+          "evaluate_us": 576.422,
+          "iterations": 418,
+          "total_us": 593.4449999999999
+        },
+        "matrix": {
+          "iterations": 428,
+          "total_us": 584.484
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "invalid": {
+        "full": {
+          "decode_us": 867.241,
+          "encode_us": 52.404999999999994,
+          "evaluate_us": 76.59599999999999,
+          "iterations": 214,
+          "total_us": 999.6510000000001
+        },
+        "lean": {
+          "decode_us": 926.511,
+          "encode_us": 55.358000000000004,
+          "evaluate_us": 82.47999999999999,
+          "iterations": 236,
+          "total_us": 1072.653
+        },
+        "matrix": {
+          "iterations": 7232,
+          "total_us": 26.750999999999998
+        },
+        "rows": 1024,
+        "workers": 1
+      },
+      "lane_kernel": "avx512f, 16 lanes",
+      "lane_width": 16,
+      "one": {
+        "full": {
+          "decode_us": 0.267,
+          "encode_us": 0.384,
+          "evaluate_us": 2.1189999999999998,
+          "iterations": 15383,
+          "total_us": 2.786
+        },
+        "lean": {
+          "decode_us": 0.255,
+          "encode_us": 0.14700000000000002,
+          "evaluate_us": 2.115,
+          "iterations": 20001,
+          "total_us": 2.532
+        },
+        "matrix": {
+          "iterations": 20001,
+          "total_us": 2.093
+        },
+        "rows": 1,
+        "workers": 1
+      },
+      "parallel": {
+        "full": {
+          "decode_us": 26.328,
+          "encode_us": 32.039,
+          "evaluate_us": 149.673,
+          "iterations": 417,
+          "total_us": 216.25
+        },
+        "lean": {
+          "decode_us": 22.402,
+          "encode_us": 9.268,
+          "evaluate_us": 113.08,
+          "iterations": 1196,
+          "total_us": 147.471
+        },
+        "matrix": {
+          "iterations": 1713,
+          "total_us": 126.365
+        },
+        "rows": 96,
+        "workers": 4
+      },
+      "serial": {
+        "full": {
+          "decode_us": 15.761000000000001,
+          "encode_us": 25.738999999999997,
+          "evaluate_us": 35.528000000000006,
+          "iterations": 2083,
+          "total_us": 77.613
+        },
+        "lean": {
+          "decode_us": 15.139000000000001,
+          "encode_us": 5.149,
+          "evaluate_us": 30.939000000000004,
+          "iterations": 3515,
+          "total_us": 52.321000000000005
+        },
+        "matrix": {
+          "iterations": 7410,
+          "total_us": 35.605999999999995
+        },
+        "rows": 96,
+        "workers": 1
+      },
+      "trace": {
+        "full": {
+          "decode_us": 2.035,
+          "encode_us": 61.034,
+          "evaluate_us": 25.789,
+          "iterations": 1803,
+          "total_us": 89.01
+        },
+        "rows": 12,
+        "workers": 1
+      },
+      "worker_scaling": {
+        "domain": {
+          "full_workers_1": {
+            "iterations": 376,
+            "total_us": 657.7589999999999
+          },
+          "full_workers_2": {
+            "iterations": 323,
+            "total_us": 496.48
+          },
+          "full_workers_4": {
+            "iterations": 467,
+            "total_us": 492.32599999999996
+          },
+          "matrix_workers_1": {
+            "iterations": 398,
+            "total_us": 629.291
+          },
+          "matrix_workers_2": {
+            "iterations": 615,
+            "total_us": 438.315
+          },
+          "matrix_workers_4": {
+            "iterations": 545,
+            "total_us": 463.966
+          }
+        },
+        "serial": {
+          "full_workers_1": {
+            "iterations": 2402,
+            "total_us": 77.189
+          },
+          "full_workers_2": {
+            "iterations": 693,
+            "total_us": 113.976
+          },
+          "full_workers_4": {
+            "iterations": 1336,
+            "total_us": 173.52
+          },
+          "matrix_workers_1": {
+            "iterations": 5363,
+            "total_us": 28.793
+          },
+          "matrix_workers_2": {
+            "iterations": 2495,
+            "total_us": 57.416000000000004
+          },
+          "matrix_workers_4": {
+            "iterations": 2502,
+            "total_us": 105.832
+          }
+        }
+      }
+    },
+    {
+      "domain": {
+        "full": {
+          "decode_us": 10.501,
+          "encode_us": 15.06,
+          "evaluate_us": 603.682,
+          "iterations": 369,
+          "total_us": 630.25
+        },
+        "lean": {
+          "decode_us": 11.215,
+          "encode_us": 3.511,
+          "evaluate_us": 616.841,
+          "iterations": 401,
+          "total_us": 634.226
+        },
+        "matrix": {
+          "iterations": 400,
+          "total_us": 632.0450000000001
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "domain2": {
+        "full": {
+          "decode_us": 11.918,
+          "encode_us": 13.977,
+          "evaluate_us": 611.2869999999999,
+          "iterations": 389,
+          "total_us": 638.8910000000001
+        },
+        "lean": {
+          "decode_us": 12.744,
+          "encode_us": 3.421,
+          "evaluate_us": 586.013,
+          "iterations": 415,
+          "total_us": 603.253
+        },
+        "matrix": {
+          "iterations": 398,
+          "total_us": 600.8679999999999
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "invalid": {
+        "full": {
+          "decode_us": 924.4989999999999,
+          "encode_us": 55.738,
+          "evaluate_us": 85.01,
+          "iterations": 175,
+          "total_us": 1070.517
+        },
+        "lean": {
+          "decode_us": 954.2520000000001,
+          "encode_us": 58.132,
+          "evaluate_us": 87.298,
+          "iterations": 224,
+          "total_us": 1101.266
+        },
+        "matrix": {
+          "iterations": 6816,
+          "total_us": 26.715
+        },
+        "rows": 1024,
+        "workers": 1
+      },
+      "lane_kernel": "avx512f, 16 lanes",
+      "lane_width": 16,
+      "one": {
+        "full": {
+          "decode_us": 0.268,
+          "encode_us": 0.38,
+          "evaluate_us": 2.12,
+          "iterations": 5128,
+          "total_us": 2.784
+        },
+        "lean": {
+          "decode_us": 0.253,
+          "encode_us": 0.14600000000000002,
+          "evaluate_us": 2.114,
+          "iterations": 20001,
+          "total_us": 2.5260000000000002
+        },
+        "matrix": {
+          "iterations": 20001,
+          "total_us": 2.093
+        },
+        "rows": 1,
+        "workers": 1
+      },
+      "parallel": {
+        "full": {
+          "decode_us": 21.985,
+          "encode_us": 28.691,
+          "evaluate_us": 123.96600000000001,
+          "iterations": 501,
+          "total_us": 178.743
+        },
+        "lean": {
+          "decode_us": 21.693,
+          "encode_us": 8.937,
+          "evaluate_us": 115.821,
+          "iterations": 1664,
+          "total_us": 149.755
+        },
+        "matrix": {
+          "iterations": 1431,
+          "total_us": 119.183
+        },
+        "rows": 96,
+        "workers": 4
+      },
+      "serial": {
+        "full": {
+          "decode_us": 15.354,
+          "encode_us": 25.196,
+          "evaluate_us": 33.935,
+          "iterations": 1553,
+          "total_us": 74.825
+        },
+        "lean": {
+          "decode_us": 15.384,
+          "encode_us": 5.2059999999999995,
+          "evaluate_us": 32.147000000000006,
+          "iterations": 2805,
+          "total_us": 53.516
+        },
+        "matrix": {
+          "iterations": 7251,
+          "total_us": 28.985
+        },
+        "rows": 96,
+        "workers": 1
+      },
+      "trace": {
+        "full": {
+          "decode_us": 3.636,
+          "encode_us": 92.465,
+          "evaluate_us": 31.116,
+          "iterations": 1204,
+          "total_us": 129.423
+        },
+        "rows": 12,
+        "workers": 1
+      },
+      "worker_scaling": {
+        "domain": {
+          "full_workers_1": {
+            "iterations": 222,
+            "total_us": 518.26
+          },
+          "full_workers_2": {
+            "iterations": 419,
+            "total_us": 476.437
+          },
+          "full_workers_4": {
+            "iterations": 457,
+            "total_us": 541.9240000000001
+          },
+          "matrix_workers_1": {
+            "iterations": 303,
+            "total_us": 687.336
+          },
+          "matrix_workers_2": {
+            "iterations": 393,
+            "total_us": 453.801
+          },
+          "matrix_workers_4": {
+            "iterations": 511,
+            "total_us": 460.429
+          }
+        },
+        "serial": {
+          "full_workers_1": {
+            "iterations": 2088,
+            "total_us": 82.50999999999999
+          },
+          "full_workers_2": {
+            "iterations": 767,
+            "total_us": 123.04500000000002
+          },
+          "full_workers_4": {
+            "iterations": 1161,
+            "total_us": 189.643
+          },
+          "matrix_workers_1": {
+            "iterations": 7098,
+            "total_us": 35.611000000000004
+          },
+          "matrix_workers_2": {
+            "iterations": 4927,
+            "total_us": 66.333
+          },
+          "matrix_workers_4": {
+            "iterations": 1251,
+            "total_us": 111.03999999999999
+          }
+        }
+      }
+    },
+    {
+      "domain": {
+        "full": {
+          "decode_us": 10.947000000000001,
+          "encode_us": 15.23,
+          "evaluate_us": 624.1709999999999,
+          "iterations": 366,
+          "total_us": 649.7280000000001
+        },
+        "lean": {
+          "decode_us": 12.128,
+          "encode_us": 4.32,
+          "evaluate_us": 635.783,
+          "iterations": 353,
+          "total_us": 654.067
+        },
+        "matrix": {
+          "iterations": 404,
+          "total_us": 772.127
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "domain2": {
+        "full": {
+          "decode_us": 12.948,
+          "encode_us": 14.238,
+          "evaluate_us": 628.909,
+          "iterations": 258,
+          "total_us": 657.198
+        },
+        "lean": {
+          "decode_us": 15.471000000000002,
+          "encode_us": 4.877,
+          "evaluate_us": 635.259,
+          "iterations": 266,
+          "total_us": 653.864
+        },
+        "matrix": {
+          "iterations": 401,
+          "total_us": 853.4830000000001
+        },
+        "rows": 48,
+        "workers": 1
+      },
+      "invalid": {
+        "full": {
+          "decode_us": 1860.587,
+          "encode_us": 108.101,
+          "evaluate_us": 146.101,
+          "iterations": 107,
+          "total_us": 2123.6150000000002
+        },
+        "lean": {
+          "decode_us": 1318.81,
+          "encode_us": 76.431,
+          "evaluate_us": 123.542,
+          "iterations": 123,
+          "total_us": 1523.8619999999999
+        },
+        "matrix": {
+          "iterations": 8362,
+          "total_us": 26.795
+        },
+        "rows": 1024,
+        "workers": 1
+      },
+      "lane_kernel": "avx512f, 16 lanes",
+      "lane_width": 16,
+      "one": {
+        "full": {
+          "decode_us": 0.277,
+          "encode_us": 0.38799999999999996,
+          "evaluate_us": 2.121,
+          "iterations": 15189,
+          "total_us": 2.796
+        },
+        "lean": {
+          "decode_us": 0.256,
+          "encode_us": 0.14600000000000002,
+          "evaluate_us": 2.115,
+          "iterations": 20001,
+          "total_us": 2.531
+        },
+        "matrix": {
+          "iterations": 20001,
+          "total_us": 2.0940000000000003
+        },
+        "rows": 1,
+        "workers": 1
+      },
+      "parallel": {
+        "full": {
+          "decode_us": 23.264999999999997,
+          "encode_us": 31.758000000000003,
+          "evaluate_us": 131.898,
+          "iterations": 397,
+          "total_us": 189.21
+        },
+        "lean": {
+          "decode_us": 23.891,
+          "encode_us": 9.639999999999999,
+          "evaluate_us": 137.716,
+          "iterations": 1234,
+          "total_us": 175.104
+        },
+        "matrix": {
+          "iterations": 1655,
+          "total_us": 113.265
+        },
+        "rows": 96,
+        "workers": 4
+      },
+      "serial": {
+        "full": {
+          "decode_us": 15.357,
+          "encode_us": 25.25,
+          "evaluate_us": 34.56,
+          "iterations": 1681,
+          "total_us": 75.19
+        },
+        "lean": {
+          "decode_us": 15.652,
+          "encode_us": 5.262,
+          "evaluate_us": 32.072,
+          "iterations": 3539,
+          "total_us": 54.232
+        },
+        "matrix": {
+          "iterations": 6852,
+          "total_us": 28.841
+        },
+        "rows": 96,
+        "workers": 1
+      },
+      "trace": {
+        "full": {
+          "decode_us": 3.1310000000000002,
+          "encode_us": 82.235,
+          "evaluate_us": 28.680999999999997,
+          "iterations": 1572,
+          "total_us": 117.812
+        },
+        "rows": 12,
+        "workers": 1
+      },
+      "worker_scaling": {
+        "domain": {
+          "full_workers_1": {
+            "iterations": 263,
+            "total_us": 665.6519999999999
+          },
+          "full_workers_2": {
+            "iterations": 352,
+            "total_us": 478.056
+          },
+          "full_workers_4": {
+            "iterations": 182,
+            "total_us": 523.895
+          },
+          "matrix_workers_1": {
+            "iterations": 390,
+            "total_us": 621.3180000000001
+          },
+          "matrix_workers_2": {
+            "iterations": 518,
+            "total_us": 448.488
+          },
+          "matrix_workers_4": {
+            "iterations": 514,
+            "total_us": 450.543
+          }
+        },
+        "serial": {
+          "full_workers_1": {
+            "iterations": 2085,
+            "total_us": 105.519
+          },
+          "full_workers_2": {
+            "iterations": 634,
+            "total_us": 161.829
+          },
+          "full_workers_4": {
+            "iterations": 1074,
+            "total_us": 232.707
+          },
+          "matrix_workers_1": {
+            "iterations": 7073,
+            "total_us": 29.128
+          },
+          "matrix_workers_2": {
+            "iterations": 4396,
+            "total_us": 71.571
+          },
+          "matrix_workers_4": {
+            "iterations": 2120,
+            "total_us": 124.02600000000001
+          }
+        }
+      }
+    }
+  ]
+}

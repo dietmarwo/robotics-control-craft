@@ -1,0 +1,40 @@
+[package]
+name = "robotics-control-craft"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Bounded robotics-control-craft research evaluator"
+license = "MIT"
+# Package sources, docs, models, validation scripts and the release evidence
+# that the source distribution has always carried; not the build artifacts,
+# patch series or performance evidence of the release ZIP.
+include = [
+    "/.gitignore",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/src/**/*.rs",
+    "/examples/*.rs",
+    "/models/*.json",
+    "/python/**/*.py",
+    "/python/**/*.json",
+    "/docs/*.md",
+    "/validation/*.py",
+    "/evidence/installed.json",
+    "/evidence/native-sweep.json",
+    "/evidence/scipy-search.json",
+    "/evidence/validation.json",
+]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+python = ["dep:pyo3", "pyo3/extension-module"]
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["raw_value", "float_roundtrip"] }
+sha2 = "=0.10.9"
+pyo3 = { version = "=0.29.0", optional = true, features = ["abi3-py310"] }

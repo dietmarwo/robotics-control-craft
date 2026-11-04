@@ -1,0 +1,991 @@
+From 0d40ec863d7a7e67b8668de5970dbfabb3b6c5b9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 12:08:34 -0400
+Subject: [PATCH 11/13] Add a phase timing harness and cumulative measurements
+
+Add an ignored test, src/breakdown.rs, that times decode, evaluate and
+encode phases of full and lean calls, matrix calls and worker scaling
+on the examples/performance.rs workloads. Record its output and the
+0.2.0-to-round-10 paired timings under evidence/performance-0.3.0/.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/breakdown.json     | 201 ++++++++++++++++++
+ .../cumulative/full-domain.json               |  38 ++++
+ .../cumulative/full-domain2.json              |  38 ++++
+ .../cumulative/full-invalid.json              |  38 ++++
+ .../cumulative/full-one.json                  |  38 ++++
+ .../cumulative/full-parallel.json             |  38 ++++
+ .../cumulative/full-serial.json               |  38 ++++
+ .../cumulative/full-trace.json                |  38 ++++
+ .../cumulative/lean-domain.json               |  38 ++++
+ .../cumulative/lean-domain2.json              |  38 ++++
+ .../cumulative/lean-serial.json               |  38 ++++
+ .../cumulative/matrix-domain.json             |  38 ++++
+ .../cumulative/matrix-serial.json             |  38 ++++
+ src/breakdown.rs                              | 168 +++++++++++++++
+ src/domain.rs                                 |  14 ++
+ src/lib.rs                                    |   2 +
+ 16 files changed, 841 insertions(+)
+ create mode 100644 evidence/performance-0.3.0/breakdown.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-domain.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-domain2.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-invalid.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-one.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-parallel.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-serial.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/full-trace.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/lean-domain.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/lean-domain2.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/lean-serial.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/matrix-domain.json
+ create mode 100644 evidence/performance-0.3.0/cumulative/matrix-serial.json
+ create mode 100644 src/breakdown.rs
+
+diff --git a/evidence/performance-0.3.0/breakdown.json b/evidence/performance-0.3.0/breakdown.json
+new file mode 100644
+index 0000000..ad7a9a0
+--- /dev/null
++++ b/evidence/performance-0.3.0/breakdown.json
+@@ -0,0 +1,201 @@
++{
++  "domain": {
++    "full": {
++      "decode_us": 10.055,
++      "encode_us": 14.292,
++      "evaluate_us": 591.22,
++      "iterations": 361,
++      "total_us": 615.42
++    },
++    "lean": {
++      "decode_us": 10.360000000000001,
++      "encode_us": 3.267,
++      "evaluate_us": 581.5319999999999,
++      "iterations": 386,
++      "total_us": 596.265
++    },
++    "matrix": {
++      "iterations": 412,
++      "total_us": 645.894
++    },
++    "rows": 48,
++    "workers": 1
++  },
++  "domain2": {
++    "full": {
++      "decode_us": 11.658,
++      "encode_us": 13.635000000000002,
++      "evaluate_us": 597.828,
++      "iterations": 385,
++      "total_us": 624.35
++    },
++    "lean": {
++      "decode_us": 12.347000000000001,
++      "encode_us": 3.375,
++      "evaluate_us": 576.422,
++      "iterations": 418,
++      "total_us": 593.4449999999999
++    },
++    "matrix": {
++      "iterations": 428,
++      "total_us": 584.484
++    },
++    "rows": 48,
++    "workers": 1
++  },
++  "invalid": {
++    "full": {
++      "decode_us": 867.241,
++      "encode_us": 52.404999999999994,
++      "evaluate_us": 76.59599999999999,
++      "iterations": 214,
++      "total_us": 999.6510000000001
++    },
++    "lean": {
++      "decode_us": 926.511,
++      "encode_us": 55.358000000000004,
++      "evaluate_us": 82.47999999999999,
++      "iterations": 236,
++      "total_us": 1072.653
++    },
++    "matrix": {
++      "iterations": 7232,
++      "total_us": 26.750999999999998
++    },
++    "rows": 1024,
++    "workers": 1
++  },
++  "lane_kernel": "avx512f, 16 lanes",
++  "lane_width": 16,
++  "one": {
++    "full": {
++      "decode_us": 0.267,
++      "encode_us": 0.384,
++      "evaluate_us": 2.1189999999999998,
++      "iterations": 15383,
++      "total_us": 2.786
++    },
++    "lean": {
++      "decode_us": 0.255,
++      "encode_us": 0.14700000000000002,
++      "evaluate_us": 2.115,
++      "iterations": 20001,
++      "total_us": 2.532
++    },
++    "matrix": {
++      "iterations": 20001,
++      "total_us": 2.093
++    },
++    "rows": 1,
++    "workers": 1
++  },
++  "parallel": {
++    "full": {
++      "decode_us": 26.328,
++      "encode_us": 32.039,
++      "evaluate_us": 149.673,
++      "iterations": 417,
++      "total_us": 216.25
++    },
++    "lean": {
++      "decode_us": 22.402,
++      "encode_us": 9.268,
++      "evaluate_us": 113.08,
++      "iterations": 1196,
++      "total_us": 147.471
++    },
++    "matrix": {
++      "iterations": 1713,
++      "total_us": 126.365
++    },
++    "rows": 96,
++    "workers": 4
++  },
++  "serial": {
++    "full": {
++      "decode_us": 15.761000000000001,
++      "encode_us": 25.738999999999997,
++      "evaluate_us": 35.528000000000006,
++      "iterations": 2083,
++      "total_us": 77.613
++    },
++    "lean": {
++      "decode_us": 15.139000000000001,
++      "encode_us": 5.149,
++      "evaluate_us": 30.939000000000004,
++      "iterations": 3515,
++      "total_us": 52.321000000000005
++    },
++    "matrix": {
++      "iterations": 7410,
++      "total_us": 35.605999999999995
++    },
++    "rows": 96,
++    "workers": 1
++  },
++  "trace": {
++    "full": {
++      "decode_us": 2.035,
++      "encode_us": 61.034,
++      "evaluate_us": 25.789,
++      "iterations": 1803,
++      "total_us": 89.01
++    },
++    "rows": 12,
++    "workers": 1
++  },
++  "worker_scaling": {
++    "domain": {
++      "full_workers_1": {
++        "iterations": 376,
++        "total_us": 657.7589999999999
++      },
++      "full_workers_2": {
++        "iterations": 323,
++        "total_us": 496.48
++      },
++      "full_workers_4": {
++        "iterations": 467,
++        "total_us": 492.32599999999996
++      },
++      "matrix_workers_1": {
++        "iterations": 398,
++        "total_us": 629.291
++      },
++      "matrix_workers_2": {
++        "iterations": 615,
++        "total_us": 438.315
++      },
++      "matrix_workers_4": {
++        "iterations": 545,
++        "total_us": 463.966
++      }
++    },
++    "serial": {
++      "full_workers_1": {
++        "iterations": 2402,
++        "total_us": 77.189
++      },
++      "full_workers_2": {
++        "iterations": 693,
++        "total_us": 113.976
++      },
++      "full_workers_4": {
++        "iterations": 1336,
++        "total_us": 173.52
++      },
++      "matrix_workers_1": {
++        "iterations": 5363,
++        "total_us": 28.793
++      },
++      "matrix_workers_2": {
++        "iterations": 2495,
++        "total_us": 57.416000000000004
++      },
++      "matrix_workers_4": {
++        "iterations": 2502,
++        "total_us": 105.832
++      }
++    }
++  }
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-domain.json b/evidence/performance-0.3.0/cumulative/full-domain.json
+new file mode 100644
+index 0000000..68e0f21
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-domain.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0068678688,
++    0.0069928958,
++    0.0059404732,
++    0.0060851012,
++    0.0063032622,
++    0.0057641288,
++    0.0059428722,
++    0.0061881652,
++    0.0062095786,
++    0.007048041400000001,
++    0.0061754556
++  ],
++  "after_seconds": [
++    0.0008079536,
++    0.000946929,
++    0.0006870562,
++    0.0006725302,
++    0.0008587595999999999,
++    0.0008657678,
++    0.0006780468,
++    0.0006260948,
++    0.0006563140000000001,
++    0.000749323,
++    0.0007384360000000001
++  ],
++  "medians_seconds": [
++    0.0061881652,
++    0.0007384360000000001
++  ],
++  "speedup": 8.38009685334951
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-domain2.json b/evidence/performance-0.3.0/cumulative/full-domain2.json
+new file mode 100644
+index 0000000..e4c7b7f
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-domain2.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain2",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0066405918,
++    0.008331507,
++    0.0064707324,
++    0.006394981399999999,
++    0.006391300399999999,
++    0.006500728999999999,
++    0.0063569308000000005,
++    0.006349815,
++    0.006380298800000001,
++    0.0063866572,
++    0.00605782
++  ],
++  "after_seconds": [
++    0.0006297564,
++    0.0006187522,
++    0.000891497,
++    0.0008692916,
++    0.0008586808,
++    0.0008644038,
++    0.0008581082000000001,
++    0.000882023,
++    0.0008127896000000001,
++    0.0008593412,
++    0.0006535842
++  ],
++  "medians_seconds": [
++    0.006391300399999999,
++    0.0008586808
++  ],
++  "speedup": 7.4431621156546175
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-invalid.json b/evidence/performance-0.3.0/cumulative/full-invalid.json
+new file mode 100644
+index 0000000..224117c
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-invalid.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "invalid",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0014636498333333331,
++    0.0012983303333333333,
++    0.001424325,
++    0.0017783568333333331,
++    0.0013764988333333332,
++    0.0016587891666666667,
++    0.0016647169999999998,
++    0.0013331495,
++    0.001328898,
++    0.001297531,
++    0.0013605971666666666
++  ],
++  "after_seconds": [
++    0.0010563588333333334,
++    0.0009996351666666666,
++    0.0010754415,
++    0.0013772589999999998,
++    0.0014628761666666667,
++    0.0013378993333333332,
++    0.0012517455,
++    0.0011321195,
++    0.0011183228333333333,
++    0.0010687455,
++    0.0010170241666666666
++  ],
++  "medians_seconds": [
++    0.0013764988333333332,
++    0.0011183228333333333
++  ],
++  "speedup": 1.2308599916809948
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-one.json b/evidence/performance-0.3.0/cumulative/full-one.json
+new file mode 100644
+index 0000000..98fead7
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-one.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "one",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    4.0485e-06,
++    3.978725e-06,
++    3.8890500000000005e-06,
++    3.730825e-06,
++    3.6421000000000002e-06,
++    7.569175e-06,
++    5.391275e-06,
++    5.1172e-06,
++    3.962975e-06,
++    4.212525e-06,
++    4.2942e-06
++  ],
++  "after_seconds": [
++    3.0583e-06,
++    2.813325e-06,
++    3.02695e-06,
++    2.8750749999999997e-06,
++    2.79415e-06,
++    3.1818250000000002e-06,
++    3.524975e-06,
++    3.3704999999999997e-06,
++    3.287875e-06,
++    2.9941e-06,
++    3.151975e-06
++  ],
++  "medians_seconds": [
++    4.0485e-06,
++    3.0583e-06
++  ],
++  "speedup": 1.3237746460451887
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-parallel.json b/evidence/performance-0.3.0/cumulative/full-parallel.json
+new file mode 100644
+index 0000000..7daec4f
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-parallel.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "parallel",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.00044495925,
++    0.00051001,
++    0.000485483,
++    0.00044785125,
++    0.0004191115,
++    0.00047025425,
++    0.00043117225,
++    0.00037246475,
++    0.000393477,
++    0.0004162245,
++    0.0012214195
++  ],
++  "after_seconds": [
++    0.0002050915,
++    0.0001869025,
++    0.00017850025,
++    0.0001908885,
++    0.000176032,
++    0.0001653055,
++    0.0002392915,
++    0.00015968575,
++    0.000211789,
++    0.0001572015,
++    0.00026750025
++  ],
++  "medians_seconds": [
++    0.00044495925,
++    0.0001869025
++  ],
++  "speedup": 2.3807025053169433
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-serial.json b/evidence/performance-0.3.0/cumulative/full-serial.json
+new file mode 100644
+index 0000000..66e9e96
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-serial.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "serial",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0003548785,
++    0.000337172,
++    0.00040715775,
++    0.000355363,
++    0.00035437575,
++    0.0003409855,
++    0.00032604275,
++    0.0003559575,
++    0.00033934375,
++    0.000507982,
++    0.0004998385
++  ],
++  "after_seconds": [
++    8.486025e-05,
++    9.194875e-05,
++    7.81195e-05,
++    7.626975e-05,
++    7.827e-05,
++    7.792925e-05,
++    0.000100211,
++    0.00011376875,
++    8.038725e-05,
++    0.00013171775,
++    0.000134718
++  ],
++  "medians_seconds": [
++    0.0003548785,
++    8.486025e-05
++  ],
++  "speedup": 4.181916739580664
++}
+diff --git a/evidence/performance-0.3.0/cumulative/full-trace.json b/evidence/performance-0.3.0/cumulative/full-trace.json
+new file mode 100644
+index 0000000..46bacc5
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/full-trace.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "trace",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.00024029116666666667,
++    0.00024306316666666667,
++    0.00023390983333333333,
++    0.00023217483333333333,
++    0.00022457166666666666,
++    0.00023880950000000002,
++    0.00022905950000000003,
++    0.000237214,
++    0.00025037666666666666,
++    0.0002520545,
++    0.0002751991666666667
++  ],
++  "after_seconds": [
++    9.981883333333333e-05,
++    0.00010123333333333333,
++    9.633716666666667e-05,
++    0.00011068366666666667,
++    9.89395e-05,
++    9.873166666666667e-05,
++    9.670066666666666e-05,
++    0.00010404583333333333,
++    0.000105231,
++    0.00010933299999999999,
++    0.00011023583333333335
++  ],
++  "medians_seconds": [
++    0.00023880950000000002,
++    0.00010123333333333333
++  ],
++  "speedup": 2.3590006585446166
++}
+diff --git a/evidence/performance-0.3.0/cumulative/lean-domain.json b/evidence/performance-0.3.0/cumulative/lean-domain.json
+new file mode 100644
+index 0000000..1006d5b
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/lean-domain.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain",
++  "modes": [
++    "scores",
++    "scores"
++  ],
++  "before_seconds": [
++    0.0061475712,
++    0.0064311690000000005,
++    0.0061506242000000004,
++    0.0061477052,
++    0.0063096812,
++    0.0065602279999999995,
++    0.006197689399999999,
++    0.0064635176,
++    0.0062682172,
++    0.0093430162,
++    0.0061356418
++  ],
++  "after_seconds": [
++    0.0009254274,
++    0.0008262728,
++    0.0006639178,
++    0.000740551,
++    0.0006385302,
++    0.0006438656,
++    0.0006744418000000001,
++    0.0006436899999999999,
++    0.0006264926,
++    0.0007194230000000001,
++    0.0007226634
++  ],
++  "medians_seconds": [
++    0.0062682172,
++    0.0006744418000000001
++  ],
++  "speedup": 9.293933442440844
++}
+diff --git a/evidence/performance-0.3.0/cumulative/lean-domain2.json b/evidence/performance-0.3.0/cumulative/lean-domain2.json
+new file mode 100644
+index 0000000..7b9cfd6
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/lean-domain2.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain2",
++  "modes": [
++    "scores",
++    "scores"
++  ],
++  "before_seconds": [
++    0.00619744,
++    0.0063100618,
++    0.0063553732,
++    0.0063127276,
++    0.0063354807999999995,
++    0.006330176799999999,
++    0.0061921836,
++    0.0059894653999999995,
++    0.006021655,
++    0.0060087196,
++    0.0059672888
++  ],
++  "after_seconds": [
++    0.000998152,
++    0.0009468726000000001,
++    0.0009360484,
++    0.0008306335999999999,
++    0.0008808514,
++    0.0008331242,
++    0.0006568348,
++    0.000613578,
++    0.0007268826,
++    0.0007026854,
++    0.0006168510000000001
++  ],
++  "medians_seconds": [
++    0.00619744,
++    0.0008306335999999999
++  ],
++  "speedup": 7.461099575071368
++}
+diff --git a/evidence/performance-0.3.0/cumulative/lean-serial.json b/evidence/performance-0.3.0/cumulative/lean-serial.json
+new file mode 100644
+index 0000000..838dced
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/lean-serial.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "serial",
++  "modes": [
++    "scores",
++    "scores"
++  ],
++  "before_seconds": [
++    0.00030953825,
++    0.000254643,
++    0.00023246825,
++    0.00024180275,
++    0.00020430125,
++    0.0001772355,
++    0.00023822875,
++    0.00020917,
++    0.0001860005,
++    0.00022032475,
++    0.00020920975
++  ],
++  "after_seconds": [
++    5.801575e-05,
++    9.07885e-05,
++    6.84735e-05,
++    7.37625e-05,
++    7.396075e-05,
++    5.204375e-05,
++    5.44335e-05,
++    5.44215e-05,
++    4.83105e-05,
++    5.453425e-05,
++    5.8414e-05
++  ],
++  "medians_seconds": [
++    0.00022032475,
++    5.801575e-05
++  ],
++  "speedup": 3.7976713220116953
++}
+diff --git a/evidence/performance-0.3.0/cumulative/matrix-domain.json b/evidence/performance-0.3.0/cumulative/matrix-domain.json
+new file mode 100644
+index 0000000..e463f8d
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/matrix-domain.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain",
++  "modes": [
++    "scores",
++    "matrix"
++  ],
++  "before_seconds": [
++    0.0063755648,
++    0.0061802946,
++    0.0064549818,
++    0.00617739,
++    0.0061315924,
++    0.0061428912,
++    0.0059271433999999994,
++    0.0064054490000000006,
++    0.0065141972,
++    0.006494097799999999,
++    0.0063297718
++  ],
++  "after_seconds": [
++    0.0006123438000000001,
++    0.0005945372,
++    0.0006301462,
++    0.0006976246,
++    0.000594385,
++    0.0006164864,
++    0.0006068192,
++    0.0009055364,
++    0.0008930214000000001,
++    0.0009809058,
++    0.0005906342
++  ],
++  "medians_seconds": [
++    0.0063297718,
++    0.0006164864
++  ],
++  "speedup": 10.267496249714512
++}
+diff --git a/evidence/performance-0.3.0/cumulative/matrix-serial.json b/evidence/performance-0.3.0/cumulative/matrix-serial.json
+new file mode 100644
+index 0000000..541c937
+--- /dev/null
++++ b/evidence/performance-0.3.0/cumulative/matrix-serial.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "serial",
++  "modes": [
++    "scores",
++    "matrix"
++  ],
++  "before_seconds": [
++    0.00023712875,
++    0.00023747175,
++    0.00023339925,
++    0.00022104925,
++    0.00021790825,
++    0.00022309875,
++    0.0002371935,
++    0.00024883375,
++    0.00024468,
++    0.000256312,
++    0.000227892
++  ],
++  "after_seconds": [
++    3.902525e-05,
++    3.07e-05,
++    3.057075e-05,
++    3.058625e-05,
++    3.0585e-05,
++    2.8882e-05,
++    5.121325e-05,
++    3.8099e-05,
++    3.140425e-05,
++    2.9166e-05,
++    2.812925e-05
++  ],
++  "medians_seconds": [
++    0.00023712875,
++    3.058625e-05
++  ],
++  "speedup": 7.752789243532634
++}
+diff --git a/src/breakdown.rs b/src/breakdown.rs
+new file mode 100644
+index 0000000..1c74f32
+--- /dev/null
++++ b/src/breakdown.rs
+@@ -0,0 +1,168 @@
++//! Phase timing of prepared calls on the `examples/performance.rs` workloads.
++//!
++//! Ignored by default. Run with
++//! `cargo test --release --locked breakdown -- --ignored --nocapture`.
++//! Prints one JSON document with per-phase medians in microseconds per call:
++//! decode (candidate and budget JSON), evaluate (validation, dispatch, domain
++//! kernel and records), encode (result JSON), plus matrix calls and worker
++//! scaling.
++
++use super::*;
++use std::hint::black_box;
++
++/// Model, candidates JSON, row-major parameters, rows and workers of a workload.
++fn workload(name: &str) -> (Value, String, Vec<f64>, usize, usize) {
++    let example: Value = serde_json::from_str(include_str!("../models/example.json")).unwrap();
++    let mut model = example["model"].clone();
++    let mut parameters = example["parameters"].clone();
++    let (count, workers, traced) = match name {
++        "one" => (1, 1, false),
++        "serial" => (96, 1, false),
++        "parallel" => (96, 4, false),
++        "trace" => (12, 1, true),
++        "invalid" => (1024, 1, false),
++        "domain" | "domain2" => {
++            model["dt_s"] = json!(0.001);
++            model["horizon_s"] = json!(4.0);
++            if name == "domain2" {
++                model["control"] = json!({"kind":"held","switches_s":[0.91,1.03,1.91,3.25]});
++                parameters = json!([-1.0, 1.0, 0.5, -0.25, 0.0]);
++            }
++            (48, 1, false)
++        }
++        _ => panic!("unknown workload"),
++    };
++    let candidates: Vec<Value> = (0..count)
++        .map(|i| {
++            let mut values = parameters.clone();
++            if name == "invalid" {
++                values = json!(vec![1.0; 63]);
++            } else if let Some(first) = values.as_array_mut().unwrap().first_mut() {
++                *first = json!(first.as_f64().unwrap() * (1.0 + (i % 13) as f64 * 0.003));
++            }
++            json!({"id": format!("candidate-{i:04}"), "parameters": values, "trace": traced})
++        })
++        .collect();
++    let matrix = candidates
++        .iter()
++        .flat_map(|c| c["parameters"].as_array().unwrap().iter())
++        .map(|v| v.as_f64().unwrap())
++        .collect();
++    (
++        model,
++        serde_json::to_string(&candidates).unwrap(),
++        matrix,
++        count,
++        workers,
++    )
++}
++
++fn median(mut values: Vec<f64>) -> f64 {
++    values.sort_by(f64::total_cmp);
++    values[values.len() / 2]
++}
++
++/// Iterations so that one workload measures for roughly a quarter second.
++fn iterations(once: f64) -> usize {
++    ((0.25 / once.max(1e-7)) as usize).clamp(11, 20_001)
++}
++
++fn phases(prepared: &Prepared, candidates: &str, budget: &str, metrics: bool) -> Value {
++    let run = || {
++        let start = Instant::now();
++        let decoded = decode_candidates(candidates).unwrap();
++        let parsed: Budget = serde_json::from_str(budget).unwrap();
++        let decoded_at = Instant::now();
++        let batch = prepared.evaluate(&decoded, parsed, metrics).unwrap();
++        let evaluated_at = Instant::now();
++        let mut out = Vec::with_capacity(256 + batch.records.len() * 256);
++        batch.write_json(&mut out).unwrap();
++        black_box(out);
++        let encoded_at = Instant::now();
++        [
++            decoded_at - start,
++            evaluated_at - decoded_at,
++            encoded_at - evaluated_at,
++            encoded_at - start,
++        ]
++        .map(|d| d.as_secs_f64() * 1e6)
++    };
++    let first = run();
++    let samples: Vec<_> = (0..iterations(first[3] * 1e-6)).map(|_| run()).collect();
++    let column = |i: usize| median(samples.iter().map(|s| s[i]).collect());
++    json!({"decode_us": column(0), "evaluate_us": column(1), "encode_us": column(2),
++           "total_us": column(3), "iterations": samples.len()})
++}
++
++fn timed(mut call: impl FnMut()) -> Value {
++    let mut once = || {
++        let start = Instant::now();
++        call();
++        start.elapsed().as_secs_f64() * 1e6
++    };
++    let first = once();
++    let samples: Vec<_> = (0..iterations(first * 1e-6)).map(|_| once()).collect();
++    json!({"total_us": median(samples.clone()), "iterations": samples.len()})
++}
++
++#[test]
++#[ignore = "timing harness; run explicitly with --ignored"]
++fn breakdown() {
++    let mut report = serde_json::Map::new();
++    for name in [
++        "one", "serial", "parallel", "trace", "invalid", "domain", "domain2",
++    ] {
++        let (model, candidates, matrix, rows, workers) = workload(name);
++        let prepared = Prepared::new(&model.to_string()).unwrap();
++        let budget = json!({ "workers": workers }).to_string();
++        let mut entry = serde_json::Map::new();
++        entry.insert("rows".into(), json!(rows));
++        entry.insert("workers".into(), json!(workers));
++        entry.insert("full".into(), phases(&prepared, &candidates, &budget, true));
++        if name != "trace" {
++            entry.insert(
++                "lean".into(),
++                phases(&prepared, &candidates, &budget, false),
++            );
++            entry.insert(
++                "matrix".into(),
++                timed(|| {
++                    black_box(prepared.score_matrix(rows, &matrix, &budget).unwrap());
++                }),
++            );
++        }
++        report.insert(name.into(), Value::Object(entry));
++    }
++    let mut scaling = serde_json::Map::new();
++    for name in ["serial", "domain"] {
++        let (model, candidates, matrix, rows, _) = workload(name);
++        let prepared = Prepared::new(&model.to_string()).unwrap();
++        let mut entry = serde_json::Map::new();
++        for workers in [1, 2, 4] {
++            let budget = json!({ "workers": workers }).to_string();
++            entry.insert(
++                format!("full_workers_{workers}"),
++                timed(|| {
++                    black_box(prepared.evaluate_json(&candidates, &budget).unwrap());
++                }),
++            );
++            entry.insert(
++                format!("matrix_workers_{workers}"),
++                timed(|| {
++                    black_box(prepared.score_matrix(rows, &matrix, &budget).unwrap());
++                }),
++            );
++        }
++        scaling.insert(name.into(), Value::Object(entry));
++    }
++    report.insert("worker_scaling".into(), Value::Object(scaling));
++    let example: Value = serde_json::from_str(include_str!("../models/example.json")).unwrap();
++    let prepared = Prepared::new(&example["model"].to_string()).unwrap();
++    let kernel = prepared.model.kernel_name();
++    report.insert("lane_kernel".into(), json!(kernel));
++    report.insert(
++        "lane_width".into(),
++        json!(domain::lane_width(&prepared.model)),
++    );
++    println!("{}", serde_json::to_string_pretty(&report).unwrap());
++}
+diff --git a/src/domain.rs b/src/domain.rs
+index f23b7ba..f1de86d 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -132,6 +132,20 @@ const LANES: usize = 8;
+ /// Lockstep width of the AVX-512 lane kernel, the largest width.
+ pub const MAX_LANES: usize = 16;
+ 
++impl Model {
++    /// Name of the lane kernel selected for this host.
++    #[cfg(test)]
++    pub fn kernel_name(&self) -> &'static str {
++        if self.avx512 {
++            "avx512f, 16 lanes"
++        } else if self.avx2 {
++            "avx2, 8 lanes"
++        } else {
++            "baseline, 8 lanes"
++        }
++    }
++}
++
+ /// Number of untraced candidates `evaluate_lanes` integrates together on this host.
+ pub fn lane_width(m: &Model) -> usize {
+     if m.avx512 { MAX_LANES } else { LANES }
+diff --git a/src/lib.rs b/src/lib.rs
+index 6f2f1a2..79f9330 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,5 @@
++#[cfg(test)]
++mod breakdown;
+ mod domain;
+ 
+ use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+-- 
+2.43.0
+

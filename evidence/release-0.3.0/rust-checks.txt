@@ -1,0 +1,8 @@
+fmt: passed
+clippy (python feature, warnings denied): passed
+tests: test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s
+release build: passed
+describe: passed
+cli request exit: 0
+native sweep: passed
+validate.py against release CLI: passed

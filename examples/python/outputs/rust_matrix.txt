@@ -1,0 +1,2 @@
+357 rows, 357 complete; best kp=16 kd=5.5 score=0.23062720947966966 steps=62
+model sha256 f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7

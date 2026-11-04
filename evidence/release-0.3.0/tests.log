@@ -1,0 +1,32 @@
+   Compiling robotics-control-craft v0.3.0 (/home/claude/craft5/robotics-control-craft)
+    Finished `release` profile [optimized] target(s) in 0.18s
+     Running unittests src/lib.rs (target/release/deps/robotics_control_craft-209fdd04de95e691)
+
+running 12 tests
+test breakdown::breakdown ... ignored, timing harness; run explicitly with --ignored
+test tests::batch_writer_matches_serde_json ... ok
+test domain::tests::vector_lane_kernels_equal_baseline_lanes ... ok
+test tests::lockstep_lanes_match_scalar_kernel ... ok
+test tests::metrics_keys_keep_sorted_json_order ... ok
+test tests::model_and_candidate_validation_are_independent ... ok
+test tests::prepared_workers_return_same_completed_records ... ok
+test tests::score_matrix_matches_scores_json ... ok
+test tests::score_matrix_rejects_bad_shapes_and_budgets ... ok
+test tests::scores_keep_order_status_steps_and_objective ... ok
+test tests::traced_rollouts_stop_after_the_trace_limit ... ok
+test tests::fast_parameter_decoding_matches_serde_json ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running unittests src/main.rs (target/release/deps/robotics_control_craft-213f5f92a0a73108)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests robotics_control_craft
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

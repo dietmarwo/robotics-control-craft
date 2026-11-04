@@ -1,0 +1,1 @@
+{"batch":true,"models":["bounded_mass_spring_damper","piecewise_constant_actuation","sampled_pd","scenario_replay"],"schema":"robotics-control-craft.capabilities/0.1","version":"0.3.0","worker_limit":64}

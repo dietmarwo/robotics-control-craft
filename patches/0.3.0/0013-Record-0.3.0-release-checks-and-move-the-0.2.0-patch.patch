@@ -1,0 +1,482 @@
+From 7bd41e7017c0d85f4a71ca541ab20e223fde5456 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 12:43:00 -0400
+Subject: [PATCH 13/13] Record 0.3.0 release checks and move the 0.2.0 patch
+ series
+
+Regenerate the release evidence with the 0.3.0 CLI and the wheel built
+from the extracted 0.3.0 sdist in a fresh CPython 3.12 environment:
+capabilities, CLI request, native sweep, independent validation,
+installed checks, release checks with the tutorial and manual blocks,
+two identical campaign manifest runs and the SciPy search. Keep the
+0.2.0 release evidence under evidence/release-0.2.0/ and summarize the
+0.3.0 checks under evidence/release-0.3.0/. Move the 0.2.0 patch files
+to patches/0.2.0/; the 0.2.0 performance log is kept unchanged and its
+patches/*.patch instruction now refers to that directory.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/campaign-replay.json                 |  2 +-
+ evidence/capabilities.json                    |  2 +-
+ evidence/cli.json                             |  2 +-
+ evidence/installed.json                       | 18 +++----
+ evidence/release-0.2.0/campaign-replay.json   |  1 +
+ evidence/release-0.2.0/capabilities.json      |  1 +
+ evidence/release-0.2.0/cli.json               |  1 +
+ evidence/release-0.2.0/installed.json         | 23 +++++++++
+ evidence/release-0.2.0/native-sweep.json      |  1 +
+ evidence/release-0.2.0/scipy-search.json      | 14 +++++
+ evidence/release-0.2.0/tutorial-check.json    |  5 ++
+ evidence/release-0.2.0/validation.json        | 51 +++++++++++++++++++
+ evidence/release-0.3.0/build.log              |  1 +
+ evidence/release-0.3.0/checks.json            | 51 +++++++++++++++++++
+ evidence/release-0.3.0/clippy.log             |  2 +
+ evidence/release-0.3.0/rust-checks.txt        |  8 +++
+ evidence/release-0.3.0/tests.log              | 32 ++++++++++++
+ evidence/scipy-search.json                    |  8 +--
+ evidence/tutorial-check.json                  |  6 ++-
+ ...d-reproducible-performance-workloads.patch |  0
+ ...-worker-and-singleton-batches-inline.patch |  0
+ ...l-records-in-input-order-without-sor.patch |  0
+ ...ash-set-to-validate-batch-identities.patch |  0
+ ...the-typed-prepared-response-directly.patch |  0
+ ...te-identifiers-through-serialization.patch |  0
+ ...en-the-unmonitored-work-counter-path.patch |  0
+ ...tive-path-with-full-feasibility-chec.patch |  0
+ ...epare-reciprocal-mass-for-RK4-stages.patch |  0
+ ...plete-domain-performance-iteration-9.patch |  0
+ ...lize-traced-and-untraced-integration.patch |  0
+ ...ance-release-tutorials-and-architect.patch |  0
+ 31 files changed, 211 insertions(+), 18 deletions(-)
+ create mode 100644 evidence/release-0.2.0/campaign-replay.json
+ create mode 100644 evidence/release-0.2.0/capabilities.json
+ create mode 100644 evidence/release-0.2.0/cli.json
+ create mode 100644 evidence/release-0.2.0/installed.json
+ create mode 100644 evidence/release-0.2.0/native-sweep.json
+ create mode 100644 evidence/release-0.2.0/scipy-search.json
+ create mode 100644 evidence/release-0.2.0/tutorial-check.json
+ create mode 100644 evidence/release-0.2.0/validation.json
+ create mode 100644 evidence/release-0.3.0/build.log
+ create mode 100644 evidence/release-0.3.0/checks.json
+ create mode 100644 evidence/release-0.3.0/clippy.log
+ create mode 100644 evidence/release-0.3.0/rust-checks.txt
+ create mode 100644 evidence/release-0.3.0/tests.log
+ rename patches/{ => 0.2.0}/0001-Add-reproducible-performance-workloads.patch (100%)
+ rename patches/{ => 0.2.0}/0002-Run-single-worker-and-singleton-batches-inline.patch (100%)
+ rename patches/{ => 0.2.0}/0003-Assemble-parallel-records-in-input-order-without-sor.patch (100%)
+ rename patches/{ => 0.2.0}/0004-Use-a-sized-hash-set-to-validate-batch-identities.patch (100%)
+ rename patches/{ => 0.2.0}/0005-Serialize-the-typed-prepared-response-directly.patch (100%)
+ rename patches/{ => 0.2.0}/0006-Borrow-candidate-identifiers-through-serialization.patch (100%)
+ rename patches/{ => 0.2.0}/0007-Shorten-the-unmonitored-work-counter-path.patch (100%)
+ rename patches/{ => 0.2.0}/0008-Add-a-lean-objective-path-with-full-feasibility-chec.patch (100%)
+ rename patches/{ => 0.2.0}/0009-Prepare-reciprocal-mass-for-RK4-stages.patch (100%)
+ rename patches/{ => 0.2.0}/0010-Complete-domain-performance-iteration-9.patch (100%)
+ rename patches/{ => 0.2.0}/0011-Specialize-traced-and-untraced-integration.patch (100%)
+ rename patches/{ => 0.2.0}/0012-Document-performance-release-tutorials-and-architect.patch (100%)
+
+diff --git a/evidence/campaign-replay.json b/evidence/campaign-replay.json
+index 7b8816e..ddd3e4d 100644
+--- a/evidence/campaign-replay.json
++++ b/evidence/campaign-replay.json
+@@ -1 +1 @@
+-[{"build_sha256": "a5a1b315ee62f6e4c7b1dd3603a67b17ea9e6e8edf6d7d74c8d60004aee555bf", "key": "ce9091c22685c991a8c0dd13a5c7261a3ccfce31bda5de54ccb02554d3d8e290", "model_sha256": "f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7", "record": {"detail": null, "id": "baseline", "metrics": {"integrated_error": 0.49996410758532783, "integrated_force_squared": 4.143845804875482, "max_abs_force_n": 3.0, "max_abs_position_m": 1.004751648768, "terminal_position_m": -0.10184556515463423, "terminal_velocity_m_s": 0.18527180201551174, "trace": null, "trace_columns": ["t_s", "x_m", "v_m_s", "held_force_n"]}, "score": 0.26183385953817806, "status": "complete", "steps": 62}, "scenario": "nominal"}]
++[{"build_sha256": "2d5bca6d49033bfe932f2b90f63bd9612f52c4a00cbf6af7dfc552fd43b37567", "key": "bb8454389e0a5951b6aca11dc8304e052044ff1129ffc936820ed7e9d61ef843", "model_sha256": "f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7", "record": {"detail": null, "id": "baseline", "metrics": {"integrated_error": 0.49996410758532783, "integrated_force_squared": 4.143845804875482, "max_abs_force_n": 3.0, "max_abs_position_m": 1.004751648768, "terminal_position_m": -0.10184556515463423, "terminal_velocity_m_s": 0.18527180201551174, "trace": null, "trace_columns": ["t_s", "x_m", "v_m_s", "held_force_n"]}, "score": 0.26183385953817806, "status": "complete", "steps": 62}, "scenario": "nominal"}]
+diff --git a/evidence/capabilities.json b/evidence/capabilities.json
+index eb7c7cc..6c8cbef 100644
+--- a/evidence/capabilities.json
++++ b/evidence/capabilities.json
+@@ -1 +1 @@
+-{"batch":true,"models":["bounded_mass_spring_damper","piecewise_constant_actuation","sampled_pd","scenario_replay"],"schema":"robotics-control-craft.capabilities/0.1","version":"0.2.0","worker_limit":64}
++{"batch":true,"models":["bounded_mass_spring_damper","piecewise_constant_actuation","sampled_pd","scenario_replay"],"schema":"robotics-control-craft.capabilities/0.1","version":"0.3.0","worker_limit":64}
+diff --git a/evidence/cli.json b/evidence/cli.json
+index 3eec82d..9de847f 100644
+--- a/evidence/cli.json
++++ b/evidence/cli.json
+@@ -1 +1 @@
+-{"model_sha256":"e37c37a806c551216722ef8e79b35d510fe6f8938e5a1f4845a1712cb3c1dc4a","records":[{"detail":null,"id":"example","metrics":{"integrated_error":0.49996410758532783,"integrated_force_squared":4.143845804875482,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.10184556515463423,"terminal_velocity_m_s":0.18527180201551174,"trace":[[0.04,1.004751648768,0.037982707746133354,-3.0],[0.08,1.0030721097153024,-0.1215232168053843,-3.0],[0.1,0.9998530457133206,-0.20026746749382823,-3.0],[0.14,0.9887257532672669,-0.35560883634967994,-3.0],[0.18000000000000002,0.9714447483288485,-0.507920150340441,-3.0],[0.2,0.960535396706731,-0.5828787096940574,-3.0],[0.24000000000000002,0.9345182540795953,-0.7174462327829139,-2.676384167438809],[0.28,0.9031833676733435,-0.8487391812547058,-2.676384167438809],[0.30000000000000004,0.8855634452473937,-0.9131085093529541,-2.676384167438809],[0.34,0.8472694624616461,-1.0011007760759725,-1.7160367622836668],[0.38,0.8055151964024874,-1.0861075665178697,-1.7160367622836668],[0.4,0.7833781933454231,-1.127463812949895,-1.7160367622836668],[0.44,0.7373281120927506,-1.1746075978660524,-0.8785851474819024],[0.48,0.6894444236203846,-1.2191389162232544,-0.8785851474819024],[0.5,0.6648477750120783,-1.2404155909286503,-0.8785851474819024],[0.54,0.6149680490610886,-1.253204119021394,-0.17855991819101247],[0.5800000000000001,0.5646206743879791,-1.2638007533972233,-0.17855991819101247],[0.6000000000000001,0.5392989370423794,-1.2682826023385947,-0.17855991819101247],[0.6400000000000001,0.4888575007360987,-1.253492406842023,0.37936945650767173],[0.6800000000000002,0.43904294144079664,-1.2369476083137727,0.37936945650767173],[0.7000000000000001,0.41439242185826164,-1.228034067884539,0.37936945650767173],[0.7400000000000001,0.3659805483738927,-1.1923320805636737,0.7984984483360313],[0.7800000000000001,0.31902353126321015,-1.1553044812431315,0.7984984483360313],[0.8,0.29610679084757136,-1.1363184864925557,0.7984984483360313],[0.8400000000000001,0.2516579973116297,-1.0859591589479114,1.088209809594826],[0.8800000000000001,0.20924238003065876,-1.034675690471176,1.088209809594826],[0.9,0.18880811381750376,-1.008717427490415,1.088209809594826],[0.9400000000000001,0.14964520464875836,-0.9493253164281907,1.262202399710815],[0.9800000000000001,0.11286960667958276,-0.8893692845067678,1.262202399710815],[1.0,0.09538360940682104,-0.8592123645697268,1.262202399710815],[1.04,0.06228549088109068,-0.7956424127087389,1.3368902915121694],[1.08,0.03173559775969078,-0.7318187569366917,1.3368902915121694],[1.1,0.017418911715109814,-0.6998447560197903,1.3368902915121694],[1.1400000000000001,-0.00930035458809192,-0.6361103692743006,1.3300138651791413],[1.1800000000000002,-0.03346994746497019,-0.5723780749781093,1.3300138651791413],[1.2000000000000002,-0.04459911852790585,-0.540544377501141,1.3300138651791413],[1.2400000000000002,-0.0650055320469267,-0.4798022120334222,1.2594852291139054],[1.2800000000000002,-0.0829859996862899,-0.41926271429784634,1.2594852291139054],[1.3,-0.0910694746947795,-0.3890980595119546,1.2594852291139054],[1.34,-0.10552396877479231,-0.3336780439133986,1.142474017803027],[1.3800000000000001,-0.11776838822072022,-0.27860812655793343,1.142474017803027],[1.4000000000000001,-0.12306658213312566,-0.25123010636095267,1.142474017803027],[1.4400000000000002,-0.1321437963612271,-0.2026994815086028,0.994726541254408],[1.4800000000000002,-0.1392885241909917,-0.15461747217032612,0.994726541254408],[1.5,-0.14214213996914232,-0.1307663933802808,0.994726541254408],[1.54,-0.1465562296202284,-0.09001730370897347,0.8301013466371309],[1.58,-0.14935024526315602,-0.04977214870801057,0.8301013466371309],[1.6,-0.15014628850555958,-0.02985607529075675,0.8301013466371309],[1.6400000000000001,-0.15068588804048558,0.002792652894059961,0.6602973046037518],[1.6800000000000002,-0.1499298466815113,0.034918726214026585,0.6602973046037518],[1.7000000000000002,-0.14907269582112903,0.050772365826939024,0.6602973046037518],[1.7400000000000002,-0.1465462489277322,0.07546730032258135,0.49474605163063806],[1.7800000000000002,-0.14304213651308267,0.099650489205082,0.49474605163063806],[1.8,-0.1409299959753991,0.1115406716765298,0.49474605163063806],[1.84,-0.13612189570318614,0.12878631420697642,0.34063864054853676],[1.8800000000000001,-0.13063346703727505,0.1455538310629059,0.34063864054853676],[1.9000000000000001,-0.1276401965913393,0.15375230560776212,0.34063864054853676],[1.9400000000000002,-0.1212775541590886,0.164309258127813,0.20305617514983293],[1.9800000000000002,-0.11450116800892436,0.17443787548700596,0.20305617514983293],[2.0,-0.110963219717341,0.1793386269058647,0.20305617514983293],[2.04,-0.1036925991538271,0.18413115903772903,0.0851756250576346],[2.05,-0.10184556515463423,0.18527180201551174,0.0851756250576346]],"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.26183385953817806,"status":"complete","steps":62}],"schema":"robotics-control-craft.result/0.1","version":"0.2.0"}
++{"model_sha256":"e37c37a806c551216722ef8e79b35d510fe6f8938e5a1f4845a1712cb3c1dc4a","records":[{"detail":null,"id":"example","metrics":{"integrated_error":0.49996410758532783,"integrated_force_squared":4.143845804875482,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.10184556515463423,"terminal_velocity_m_s":0.18527180201551174,"trace":[[0.04,1.004751648768,0.037982707746133354,-3.0],[0.08,1.0030721097153024,-0.1215232168053843,-3.0],[0.1,0.9998530457133206,-0.20026746749382823,-3.0],[0.14,0.9887257532672669,-0.35560883634967994,-3.0],[0.18000000000000002,0.9714447483288485,-0.507920150340441,-3.0],[0.2,0.960535396706731,-0.5828787096940574,-3.0],[0.24000000000000002,0.9345182540795953,-0.7174462327829139,-2.676384167438809],[0.28,0.9031833676733435,-0.8487391812547058,-2.676384167438809],[0.30000000000000004,0.8855634452473937,-0.9131085093529541,-2.676384167438809],[0.34,0.8472694624616461,-1.0011007760759725,-1.7160367622836668],[0.38,0.8055151964024874,-1.0861075665178697,-1.7160367622836668],[0.4,0.7833781933454231,-1.127463812949895,-1.7160367622836668],[0.44,0.7373281120927506,-1.1746075978660524,-0.8785851474819024],[0.48,0.6894444236203846,-1.2191389162232544,-0.8785851474819024],[0.5,0.6648477750120783,-1.2404155909286503,-0.8785851474819024],[0.54,0.6149680490610886,-1.253204119021394,-0.17855991819101247],[0.5800000000000001,0.5646206743879791,-1.2638007533972233,-0.17855991819101247],[0.6000000000000001,0.5392989370423794,-1.2682826023385947,-0.17855991819101247],[0.6400000000000001,0.4888575007360987,-1.253492406842023,0.37936945650767173],[0.6800000000000002,0.43904294144079664,-1.2369476083137727,0.37936945650767173],[0.7000000000000001,0.41439242185826164,-1.228034067884539,0.37936945650767173],[0.7400000000000001,0.3659805483738927,-1.1923320805636737,0.7984984483360313],[0.7800000000000001,0.31902353126321015,-1.1553044812431315,0.7984984483360313],[0.8,0.29610679084757136,-1.1363184864925557,0.7984984483360313],[0.8400000000000001,0.2516579973116297,-1.0859591589479114,1.088209809594826],[0.8800000000000001,0.20924238003065876,-1.034675690471176,1.088209809594826],[0.9,0.18880811381750376,-1.008717427490415,1.088209809594826],[0.9400000000000001,0.14964520464875836,-0.9493253164281907,1.262202399710815],[0.9800000000000001,0.11286960667958276,-0.8893692845067678,1.262202399710815],[1.0,0.09538360940682104,-0.8592123645697268,1.262202399710815],[1.04,0.06228549088109068,-0.7956424127087389,1.3368902915121694],[1.08,0.03173559775969078,-0.7318187569366917,1.3368902915121694],[1.1,0.017418911715109814,-0.6998447560197903,1.3368902915121694],[1.1400000000000001,-0.00930035458809192,-0.6361103692743006,1.3300138651791413],[1.1800000000000002,-0.03346994746497019,-0.5723780749781093,1.3300138651791413],[1.2000000000000002,-0.04459911852790585,-0.540544377501141,1.3300138651791413],[1.2400000000000002,-0.0650055320469267,-0.4798022120334222,1.2594852291139054],[1.2800000000000002,-0.0829859996862899,-0.41926271429784634,1.2594852291139054],[1.3,-0.0910694746947795,-0.3890980595119546,1.2594852291139054],[1.34,-0.10552396877479231,-0.3336780439133986,1.142474017803027],[1.3800000000000001,-0.11776838822072022,-0.27860812655793343,1.142474017803027],[1.4000000000000001,-0.12306658213312566,-0.25123010636095267,1.142474017803027],[1.4400000000000002,-0.1321437963612271,-0.2026994815086028,0.994726541254408],[1.4800000000000002,-0.1392885241909917,-0.15461747217032612,0.994726541254408],[1.5,-0.14214213996914232,-0.1307663933802808,0.994726541254408],[1.54,-0.1465562296202284,-0.09001730370897347,0.8301013466371309],[1.58,-0.14935024526315602,-0.04977214870801057,0.8301013466371309],[1.6,-0.15014628850555958,-0.02985607529075675,0.8301013466371309],[1.6400000000000001,-0.15068588804048558,0.002792652894059961,0.6602973046037518],[1.6800000000000002,-0.1499298466815113,0.034918726214026585,0.6602973046037518],[1.7000000000000002,-0.14907269582112903,0.050772365826939024,0.6602973046037518],[1.7400000000000002,-0.1465462489277322,0.07546730032258135,0.49474605163063806],[1.7800000000000002,-0.14304213651308267,0.099650489205082,0.49474605163063806],[1.8,-0.1409299959753991,0.1115406716765298,0.49474605163063806],[1.84,-0.13612189570318614,0.12878631420697642,0.34063864054853676],[1.8800000000000001,-0.13063346703727505,0.1455538310629059,0.34063864054853676],[1.9000000000000001,-0.1276401965913393,0.15375230560776212,0.34063864054853676],[1.9400000000000002,-0.1212775541590886,0.164309258127813,0.20305617514983293],[1.9800000000000002,-0.11450116800892436,0.17443787548700596,0.20305617514983293],[2.0,-0.110963219717341,0.1793386269058647,0.20305617514983293],[2.04,-0.1036925991538271,0.18413115903772903,0.0851756250576346],[2.05,-0.10184556515463423,0.18527180201551174,0.0851756250576346]],"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.26183385953817806,"status":"complete","steps":62}],"schema":"robotics-control-craft.result/0.1","version":"0.3.0"}
+diff --git a/evidence/installed.json b/evidence/installed.json
+index f818c5d..6b4af14 100644
+--- a/evidence/installed.json
++++ b/evidence/installed.json
+@@ -6,18 +6,18 @@
+   "introductory_score": 0.26183385953817806,
+   "batch_candidates": 96,
+   "cold_prepare_and_run_seconds": [
+-    0.0009476859995629638,
+-    0.0006214749955688603,
+-    0.0007034279988147318
++    0.0007412499999190914,
++    0.0005771830001322087,
++    0.0004508950005401857
+   ],
+   "prepared_worker_1_seconds": [
+-    0.0006133529968792573,
+-    0.0005768579940195195,
+-    0.000634714997431729
++    0.00045819000024494017,
++    0.0004151860002821195,
++    0.0005043159999331692
+   ],
+   "prepared_worker_4_seconds": [
+-    0.0006917600039741956,
+-    0.0005897369992453605,
+-    0.0006372089992510155
++    0.0006389780000972678,
++    0.0006500489998870762,
++    0.0005587320001723128
+   ]
+ }
+diff --git a/evidence/release-0.2.0/campaign-replay.json b/evidence/release-0.2.0/campaign-replay.json
+new file mode 100644
+index 0000000..7b8816e
+--- /dev/null
++++ b/evidence/release-0.2.0/campaign-replay.json
+@@ -0,0 +1 @@
++[{"build_sha256": "a5a1b315ee62f6e4c7b1dd3603a67b17ea9e6e8edf6d7d74c8d60004aee555bf", "key": "ce9091c22685c991a8c0dd13a5c7261a3ccfce31bda5de54ccb02554d3d8e290", "model_sha256": "f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7", "record": {"detail": null, "id": "baseline", "metrics": {"integrated_error": 0.49996410758532783, "integrated_force_squared": 4.143845804875482, "max_abs_force_n": 3.0, "max_abs_position_m": 1.004751648768, "terminal_position_m": -0.10184556515463423, "terminal_velocity_m_s": 0.18527180201551174, "trace": null, "trace_columns": ["t_s", "x_m", "v_m_s", "held_force_n"]}, "score": 0.26183385953817806, "status": "complete", "steps": 62}, "scenario": "nominal"}]
+diff --git a/evidence/release-0.2.0/capabilities.json b/evidence/release-0.2.0/capabilities.json
+new file mode 100644
+index 0000000..eb7c7cc
+--- /dev/null
++++ b/evidence/release-0.2.0/capabilities.json
+@@ -0,0 +1 @@
++{"batch":true,"models":["bounded_mass_spring_damper","piecewise_constant_actuation","sampled_pd","scenario_replay"],"schema":"robotics-control-craft.capabilities/0.1","version":"0.2.0","worker_limit":64}
+diff --git a/evidence/release-0.2.0/cli.json b/evidence/release-0.2.0/cli.json
+new file mode 100644
+index 0000000..3eec82d
+--- /dev/null
++++ b/evidence/release-0.2.0/cli.json
+@@ -0,0 +1 @@
++{"model_sha256":"e37c37a806c551216722ef8e79b35d510fe6f8938e5a1f4845a1712cb3c1dc4a","records":[{"detail":null,"id":"example","metrics":{"integrated_error":0.49996410758532783,"integrated_force_squared":4.143845804875482,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.10184556515463423,"terminal_velocity_m_s":0.18527180201551174,"trace":[[0.04,1.004751648768,0.037982707746133354,-3.0],[0.08,1.0030721097153024,-0.1215232168053843,-3.0],[0.1,0.9998530457133206,-0.20026746749382823,-3.0],[0.14,0.9887257532672669,-0.35560883634967994,-3.0],[0.18000000000000002,0.9714447483288485,-0.507920150340441,-3.0],[0.2,0.960535396706731,-0.5828787096940574,-3.0],[0.24000000000000002,0.9345182540795953,-0.7174462327829139,-2.676384167438809],[0.28,0.9031833676733435,-0.8487391812547058,-2.676384167438809],[0.30000000000000004,0.8855634452473937,-0.9131085093529541,-2.676384167438809],[0.34,0.8472694624616461,-1.0011007760759725,-1.7160367622836668],[0.38,0.8055151964024874,-1.0861075665178697,-1.7160367622836668],[0.4,0.7833781933454231,-1.127463812949895,-1.7160367622836668],[0.44,0.7373281120927506,-1.1746075978660524,-0.8785851474819024],[0.48,0.6894444236203846,-1.2191389162232544,-0.8785851474819024],[0.5,0.6648477750120783,-1.2404155909286503,-0.8785851474819024],[0.54,0.6149680490610886,-1.253204119021394,-0.17855991819101247],[0.5800000000000001,0.5646206743879791,-1.2638007533972233,-0.17855991819101247],[0.6000000000000001,0.5392989370423794,-1.2682826023385947,-0.17855991819101247],[0.6400000000000001,0.4888575007360987,-1.253492406842023,0.37936945650767173],[0.6800000000000002,0.43904294144079664,-1.2369476083137727,0.37936945650767173],[0.7000000000000001,0.41439242185826164,-1.228034067884539,0.37936945650767173],[0.7400000000000001,0.3659805483738927,-1.1923320805636737,0.7984984483360313],[0.7800000000000001,0.31902353126321015,-1.1553044812431315,0.7984984483360313],[0.8,0.29610679084757136,-1.1363184864925557,0.7984984483360313],[0.8400000000000001,0.2516579973116297,-1.0859591589479114,1.088209809594826],[0.8800000000000001,0.20924238003065876,-1.034675690471176,1.088209809594826],[0.9,0.18880811381750376,-1.008717427490415,1.088209809594826],[0.9400000000000001,0.14964520464875836,-0.9493253164281907,1.262202399710815],[0.9800000000000001,0.11286960667958276,-0.8893692845067678,1.262202399710815],[1.0,0.09538360940682104,-0.8592123645697268,1.262202399710815],[1.04,0.06228549088109068,-0.7956424127087389,1.3368902915121694],[1.08,0.03173559775969078,-0.7318187569366917,1.3368902915121694],[1.1,0.017418911715109814,-0.6998447560197903,1.3368902915121694],[1.1400000000000001,-0.00930035458809192,-0.6361103692743006,1.3300138651791413],[1.1800000000000002,-0.03346994746497019,-0.5723780749781093,1.3300138651791413],[1.2000000000000002,-0.04459911852790585,-0.540544377501141,1.3300138651791413],[1.2400000000000002,-0.0650055320469267,-0.4798022120334222,1.2594852291139054],[1.2800000000000002,-0.0829859996862899,-0.41926271429784634,1.2594852291139054],[1.3,-0.0910694746947795,-0.3890980595119546,1.2594852291139054],[1.34,-0.10552396877479231,-0.3336780439133986,1.142474017803027],[1.3800000000000001,-0.11776838822072022,-0.27860812655793343,1.142474017803027],[1.4000000000000001,-0.12306658213312566,-0.25123010636095267,1.142474017803027],[1.4400000000000002,-0.1321437963612271,-0.2026994815086028,0.994726541254408],[1.4800000000000002,-0.1392885241909917,-0.15461747217032612,0.994726541254408],[1.5,-0.14214213996914232,-0.1307663933802808,0.994726541254408],[1.54,-0.1465562296202284,-0.09001730370897347,0.8301013466371309],[1.58,-0.14935024526315602,-0.04977214870801057,0.8301013466371309],[1.6,-0.15014628850555958,-0.02985607529075675,0.8301013466371309],[1.6400000000000001,-0.15068588804048558,0.002792652894059961,0.6602973046037518],[1.6800000000000002,-0.1499298466815113,0.034918726214026585,0.6602973046037518],[1.7000000000000002,-0.14907269582112903,0.050772365826939024,0.6602973046037518],[1.7400000000000002,-0.1465462489277322,0.07546730032258135,0.49474605163063806],[1.7800000000000002,-0.14304213651308267,0.099650489205082,0.49474605163063806],[1.8,-0.1409299959753991,0.1115406716765298,0.49474605163063806],[1.84,-0.13612189570318614,0.12878631420697642,0.34063864054853676],[1.8800000000000001,-0.13063346703727505,0.1455538310629059,0.34063864054853676],[1.9000000000000001,-0.1276401965913393,0.15375230560776212,0.34063864054853676],[1.9400000000000002,-0.1212775541590886,0.164309258127813,0.20305617514983293],[1.9800000000000002,-0.11450116800892436,0.17443787548700596,0.20305617514983293],[2.0,-0.110963219717341,0.1793386269058647,0.20305617514983293],[2.04,-0.1036925991538271,0.18413115903772903,0.0851756250576346],[2.05,-0.10184556515463423,0.18527180201551174,0.0851756250576346]],"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.26183385953817806,"status":"complete","steps":62}],"schema":"robotics-control-craft.result/0.1","version":"0.2.0"}
+diff --git a/evidence/release-0.2.0/installed.json b/evidence/release-0.2.0/installed.json
+new file mode 100644
+index 0000000..f818c5d
+--- /dev/null
++++ b/evidence/release-0.2.0/installed.json
+@@ -0,0 +1,23 @@
++{
++  "installed": true,
++  "ordered_replay": true,
++  "resumed_results": 12,
++  "retained_attempts": 21,
++  "introductory_score": 0.26183385953817806,
++  "batch_candidates": 96,
++  "cold_prepare_and_run_seconds": [
++    0.0009476859995629638,
++    0.0006214749955688603,
++    0.0007034279988147318
++  ],
++  "prepared_worker_1_seconds": [
++    0.0006133529968792573,
++    0.0005768579940195195,
++    0.000634714997431729
++  ],
++  "prepared_worker_4_seconds": [
++    0.0006917600039741956,
++    0.0005897369992453605,
++    0.0006372089992510155
++  ]
++}
+diff --git a/evidence/release-0.2.0/native-sweep.json b/evidence/release-0.2.0/native-sweep.json
+new file mode 100644
+index 0000000..3382d7f
+--- /dev/null
++++ b/evidence/release-0.2.0/native-sweep.json
+@@ -0,0 +1 @@
++{"detail":null,"id":"4","metrics":{"integrated_error":0.4846115392329917,"integrated_force_squared":4.683341872923213,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.05998901457910427,"terminal_velocity_m_s":0.14412306659006174,"trace":null,"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.24675504237200888,"status":"complete","steps":62}
+diff --git a/evidence/release-0.2.0/scipy-search.json b/evidence/release-0.2.0/scipy-search.json
+new file mode 100644
+index 0000000..435f807
+--- /dev/null
++++ b/evidence/release-0.2.0/scipy-search.json
+@@ -0,0 +1,14 @@
++{
++  "mode": "full",
++  "total_seconds": 0.009776812003110535,
++  "prepare_seconds": 6.622900400543585e-05,
++  "search_seconds": 0.009615260001737624,
++  "replay_seconds": 9.532299736747518e-05,
++  "evaluations": 48,
++  "failures": 0,
++  "best": [
++    5.574900894396944,
++    2.6972219501353756
++  ],
++  "score": 0.24281542939165648
++}
+diff --git a/evidence/release-0.2.0/tutorial-check.json b/evidence/release-0.2.0/tutorial-check.json
+new file mode 100644
+index 0000000..c7d61d6
+--- /dev/null
++++ b/evidence/release-0.2.0/tutorial-check.json
+@@ -0,0 +1,5 @@
++{
++  "status": "passed",
++  "tutorial_python_blocks": 4,
++  "lean_api_and_budget_parity": true
++}
+diff --git a/evidence/release-0.2.0/validation.json b/evidence/release-0.2.0/validation.json
+new file mode 100644
+index 0000000..b122989
+--- /dev/null
++++ b/evidence/release-0.2.0/validation.json
+@@ -0,0 +1,51 @@
++{
++  "descriptor": "integrated error and effort bins",
++  "feasible_descriptor_cells": 14,
++  "holdout_baseline": [
++    0.5776285471016909,
++    0.6150135396845432,
++    0.573485991386851,
++    0.5663483264188117,
++    0.5315972388388047,
++    0.5470709639948148
++  ],
++  "holdout_failed": 0,
++  "holdout_winner": [
++    0.26600487331688455,
++    0.2917306550346557,
++    0.2629514394549748,
++    0.2527249545895165,
++    0.23136960818661165,
++    0.24045343964356175
++  ],
++  "reference": [
++    {
++      "damping": 0.4,
++      "errors": [
++        4.815403324975875e-07,
++        3.0071133139131234e-08,
++        1.906865776390987e-09
++      ]
++    },
++    {
++      "damping": 2,
++      "errors": [
++        2.6737086766814855e-07,
++        1.5990009677446793e-08,
++        9.877864359797428e-10
++      ]
++    },
++    {
++      "damping": 4,
++      "errors": [
++        4.045819552156438e-07,
++        2.2332738797148366e-08,
++        1.3332098758311872e-09
++      ]
++    }
++  ],
++  "winner": [
++    4,
++    2
++  ]
++}
+diff --git a/evidence/release-0.3.0/build.log b/evidence/release-0.3.0/build.log
+new file mode 100644
+index 0000000..2cc0112
+--- /dev/null
++++ b/evidence/release-0.3.0/build.log
+@@ -0,0 +1 @@
++    Finished `release` profile [optimized] target(s) in 0.02s
+diff --git a/evidence/release-0.3.0/checks.json b/evidence/release-0.3.0/checks.json
+new file mode 100644
+index 0000000..705da44
+--- /dev/null
++++ b/evidence/release-0.3.0/checks.json
+@@ -0,0 +1,51 @@
++{
++  "host": "2 vCPUs, Intel(R) Xeon(R) Processor @ 2.10GHz (KVM), Rust 1.97.0, CPython 3.12.3",
++  "rust": [
++    "fmt: passed",
++    "clippy (python feature, warnings denied): passed",
++    "tests: test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s",
++    "release build: passed",
++    "describe: passed",
++    "cli request exit: 0",
++    "native sweep: passed",
++    "validate.py against release CLI: passed"
++  ],
++  "validation": "validation/validate.py against target/release/robotics-control-craft passed; evidence/validation.json and models/example.json regenerated byte-identical",
++  "sdist": {
++    "file": "robotics_control_craft-0.3.0.tar.gz",
++    "sha256": "8ac243d7a5bbf0695e38919e291e38e5c6b71144fa15d02727aaea9d6c2ad4ce",
++    "files": 38
++  },
++  "wheel": {
++    "file": "robotics_control_craft-0.3.0-cp310-abi3-manylinux_2_34_x86_64.whl",
++    "sha256": "ce1203d8dc91c165706dc2b07ddd755fe0a811a739e1b4fb46d312734064e154",
++    "built_from": "extracted sdist with maturin 1.9.6 --release --locked",
++    "installed_into": "fresh CPython 3.12.3 venv"
++  },
++  "installed_py": {
++    "installed": true,
++    "ordered_replay": true,
++    "resumed_results": 12,
++    "retained_attempts": 21,
++    "introductory_score": 0.26183385953817806,
++    "batch_candidates": 96
++  },
++  "release_checks_py": {
++    "status": "passed",
++    "tutorial_python_blocks": 5,
++    "lean_api_and_budget_parity": true,
++    "matrix_api_parity": true,
++    "manual_python_blocks": 26
++  },
++  "campaign": "two validation/run_campaign.py runs of models/campaign.json against one database produced identical output (cmp)",
++  "scipy_search": {
++    "mode": "full",
++    "evaluations": 48,
++    "failures": 0,
++    "best": [
++      5.574900894396944,
++      2.6972219501353756
++    ],
++    "score": 0.24281542939165648
++  }
++}
+\ No newline at end of file
+diff --git a/evidence/release-0.3.0/clippy.log b/evidence/release-0.3.0/clippy.log
+new file mode 100644
+index 0000000..5f9b532
+--- /dev/null
++++ b/evidence/release-0.3.0/clippy.log
+@@ -0,0 +1,2 @@
++    Checking robotics-control-craft v0.3.0 (/home/claude/craft5/robotics-control-craft)
++    Finished `release` profile [optimized] target(s) in 0.87s
+diff --git a/evidence/release-0.3.0/rust-checks.txt b/evidence/release-0.3.0/rust-checks.txt
+new file mode 100644
+index 0000000..608f27c
+--- /dev/null
++++ b/evidence/release-0.3.0/rust-checks.txt
+@@ -0,0 +1,8 @@
++fmt: passed
++clippy (python feature, warnings denied): passed
++tests: test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s
++release build: passed
++describe: passed
++cli request exit: 0
++native sweep: passed
++validate.py against release CLI: passed
+diff --git a/evidence/release-0.3.0/tests.log b/evidence/release-0.3.0/tests.log
+new file mode 100644
+index 0000000..1d33373
+--- /dev/null
++++ b/evidence/release-0.3.0/tests.log
+@@ -0,0 +1,32 @@
++   Compiling robotics-control-craft v0.3.0 (/home/claude/craft5/robotics-control-craft)
++    Finished `release` profile [optimized] target(s) in 0.18s
++     Running unittests src/lib.rs (target/release/deps/robotics_control_craft-209fdd04de95e691)
++
++running 12 tests
++test breakdown::breakdown ... ignored, timing harness; run explicitly with --ignored
++test tests::batch_writer_matches_serde_json ... ok
++test domain::tests::vector_lane_kernels_equal_baseline_lanes ... ok
++test tests::lockstep_lanes_match_scalar_kernel ... ok
++test tests::metrics_keys_keep_sorted_json_order ... ok
++test tests::model_and_candidate_validation_are_independent ... ok
++test tests::prepared_workers_return_same_completed_records ... ok
++test tests::score_matrix_matches_scores_json ... ok
++test tests::score_matrix_rejects_bad_shapes_and_budgets ... ok
++test tests::scores_keep_order_status_steps_and_objective ... ok
++test tests::traced_rollouts_stop_after_the_trace_limit ... ok
++test tests::fast_parameter_decoding_matches_serde_json ... ok
++
++test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.23s
++
++     Running unittests src/main.rs (target/release/deps/robotics_control_craft-213f5f92a0a73108)
++
++running 0 tests
++
++test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
++
++   Doc-tests robotics_control_craft
++
++running 0 tests
++
++test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
++
+diff --git a/evidence/scipy-search.json b/evidence/scipy-search.json
+index 435f807..f168770 100644
+--- a/evidence/scipy-search.json
++++ b/evidence/scipy-search.json
+@@ -1,9 +1,9 @@
+ {
+   "mode": "full",
+-  "total_seconds": 0.009776812003110535,
+-  "prepare_seconds": 6.622900400543585e-05,
+-  "search_seconds": 0.009615260001737624,
+-  "replay_seconds": 9.532299736747518e-05,
++  "total_seconds": 0.005254888999843388,
++  "prepare_seconds": 0.00014714299959450727,
++  "search_seconds": 0.005002466999940225,
++  "replay_seconds": 0.00010527900030865567,
+   "evaluations": 48,
+   "failures": 0,
+   "best": [
+diff --git a/evidence/tutorial-check.json b/evidence/tutorial-check.json
+index c7d61d6..ad6f2b4 100644
+--- a/evidence/tutorial-check.json
++++ b/evidence/tutorial-check.json
+@@ -1,5 +1,7 @@
+ {
+   "status": "passed",
+-  "tutorial_python_blocks": 4,
+-  "lean_api_and_budget_parity": true
++  "tutorial_python_blocks": 5,
++  "lean_api_and_budget_parity": true,
++  "matrix_api_parity": true,
++  "manual_python_blocks": 26
+ }
+diff --git a/patches/0001-Add-reproducible-performance-workloads.patch b/patches/0.2.0/0001-Add-reproducible-performance-workloads.patch
+similarity index 100%
+rename from patches/0001-Add-reproducible-performance-workloads.patch
+rename to patches/0.2.0/0001-Add-reproducible-performance-workloads.patch
+diff --git a/patches/0002-Run-single-worker-and-singleton-batches-inline.patch b/patches/0.2.0/0002-Run-single-worker-and-singleton-batches-inline.patch
+similarity index 100%
+rename from patches/0002-Run-single-worker-and-singleton-batches-inline.patch
+rename to patches/0.2.0/0002-Run-single-worker-and-singleton-batches-inline.patch
+diff --git a/patches/0003-Assemble-parallel-records-in-input-order-without-sor.patch b/patches/0.2.0/0003-Assemble-parallel-records-in-input-order-without-sor.patch
+similarity index 100%
+rename from patches/0003-Assemble-parallel-records-in-input-order-without-sor.patch
+rename to patches/0.2.0/0003-Assemble-parallel-records-in-input-order-without-sor.patch
+diff --git a/patches/0004-Use-a-sized-hash-set-to-validate-batch-identities.patch b/patches/0.2.0/0004-Use-a-sized-hash-set-to-validate-batch-identities.patch
+similarity index 100%
+rename from patches/0004-Use-a-sized-hash-set-to-validate-batch-identities.patch
+rename to patches/0.2.0/0004-Use-a-sized-hash-set-to-validate-batch-identities.patch
+diff --git a/patches/0005-Serialize-the-typed-prepared-response-directly.patch b/patches/0.2.0/0005-Serialize-the-typed-prepared-response-directly.patch
+similarity index 100%
+rename from patches/0005-Serialize-the-typed-prepared-response-directly.patch
+rename to patches/0.2.0/0005-Serialize-the-typed-prepared-response-directly.patch
+diff --git a/patches/0006-Borrow-candidate-identifiers-through-serialization.patch b/patches/0.2.0/0006-Borrow-candidate-identifiers-through-serialization.patch
+similarity index 100%
+rename from patches/0006-Borrow-candidate-identifiers-through-serialization.patch
+rename to patches/0.2.0/0006-Borrow-candidate-identifiers-through-serialization.patch
+diff --git a/patches/0007-Shorten-the-unmonitored-work-counter-path.patch b/patches/0.2.0/0007-Shorten-the-unmonitored-work-counter-path.patch
+similarity index 100%
+rename from patches/0007-Shorten-the-unmonitored-work-counter-path.patch
+rename to patches/0.2.0/0007-Shorten-the-unmonitored-work-counter-path.patch
+diff --git a/patches/0008-Add-a-lean-objective-path-with-full-feasibility-chec.patch b/patches/0.2.0/0008-Add-a-lean-objective-path-with-full-feasibility-chec.patch
+similarity index 100%
+rename from patches/0008-Add-a-lean-objective-path-with-full-feasibility-chec.patch
+rename to patches/0.2.0/0008-Add-a-lean-objective-path-with-full-feasibility-chec.patch
+diff --git a/patches/0009-Prepare-reciprocal-mass-for-RK4-stages.patch b/patches/0.2.0/0009-Prepare-reciprocal-mass-for-RK4-stages.patch
+similarity index 100%
+rename from patches/0009-Prepare-reciprocal-mass-for-RK4-stages.patch
+rename to patches/0.2.0/0009-Prepare-reciprocal-mass-for-RK4-stages.patch
+diff --git a/patches/0010-Complete-domain-performance-iteration-9.patch b/patches/0.2.0/0010-Complete-domain-performance-iteration-9.patch
+similarity index 100%
+rename from patches/0010-Complete-domain-performance-iteration-9.patch
+rename to patches/0.2.0/0010-Complete-domain-performance-iteration-9.patch
+diff --git a/patches/0011-Specialize-traced-and-untraced-integration.patch b/patches/0.2.0/0011-Specialize-traced-and-untraced-integration.patch
+similarity index 100%
+rename from patches/0011-Specialize-traced-and-untraced-integration.patch
+rename to patches/0.2.0/0011-Specialize-traced-and-untraced-integration.patch
+diff --git a/patches/0012-Document-performance-release-tutorials-and-architect.patch b/patches/0.2.0/0012-Document-performance-release-tutorials-and-architect.patch
+similarity index 100%
+rename from patches/0012-Document-performance-release-tutorials-and-architect.patch
+rename to patches/0.2.0/0012-Document-performance-release-tutorials-and-architect.patch
+-- 
+2.43.0
+

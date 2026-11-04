@@ -1,0 +1,287 @@
+From 8b2eda92a2fb84d80a472f0271488802f899dd8f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 12:06:25 -0400
+Subject: [PATCH 10/13] Round 10: Write batch JSON with pre-encoded keys
+
+Batch::write_json writes the envelope, record and metrics keys, status
+strings, schema, version and the trace column list as pre-encoded
+bytes in serde's field order. Ids, details, failure metrics, numbers
+and traces still go through serde_json, so strings and floats use the
+same escaping and formatter. evaluate_json and scores_json use the
+writer; the CLI Value path keeps the derived serializer. A unit test
+requires byte equality with serde_json::to_string for complete,
+failed, cancelled, work-limited, traced and lean batches and for
+escaped ids, details and JSON failure metrics.
+
+Workload: serial (96 full records, 62 steps each, one worker).
+Before median: 0.1071 ms. After median: 0.0876 ms. Speedup: 1.22x.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/plan.md            |  21 +++
+ .../performance-0.3.0/round10-serial.json     |  38 ++++++
+ src/domain.rs                                 |  27 ++++
+ src/lib.rs                                    | 121 +++++++++++++++++-
+ 4 files changed, 205 insertions(+), 2 deletions(-)
+ create mode 100644 evidence/performance-0.3.0/round10-serial.json
+
+diff --git a/evidence/performance-0.3.0/plan.md b/evidence/performance-0.3.0/plan.md
+index da70c3f..26370b3 100644
+--- a/evidence/performance-0.3.0/plan.md
++++ b/evidence/performance-0.3.0/plan.md
+@@ -222,3 +222,24 @@ check passes. Otherwise revert it and record it under `rejected/`.
+   `domain2`.
+ - Expected effect: 1.05x to 1.15x on `domain`.
+ - Floating-point results: bit-identical.
++
++### Round 10: write batch JSON with pre-encoded keys
++
++- Target workload: `serial` (96 full records, 62 steps each, one
++  worker), round 9 binary before, round 10 binary after, full mode.
++- Profile after round 9 (callgrind): `format_escaped_str` alone is 12%
++  of `one` and 9% of lean `serial`. serde_json escape-scans every
++  struct key and static string of every record (six record keys, eight
++  metrics keys, four column names, status strings).
++- Change: `Batch::write_json` writes the envelope, record and metrics
++  keys, the status strings and the trace column list as pre-encoded
++  bytes, in serde's field order. Values that can need escaping or
++  formatting (ids, details, failure metrics, numbers and traces) still
++  go through serde_json, so floats and strings use the same formatter.
++  `evaluate_json` and `scores_json` use it; the CLI `Value` path keeps
++  the derived serializer. A unit test requires byte equality with
++  `serde_json::to_string` for complete, failed, traced and lean
++  batches.
++- Expected effect: 1.1x to 1.25x on `serial` full; smaller gains on
++  lean and `invalid`.
++- Floating-point results: unchanged (same formatter).
+diff --git a/evidence/performance-0.3.0/round10-serial.json b/evidence/performance-0.3.0/round10-serial.json
+new file mode 100644
+index 0000000..2a288fa
+--- /dev/null
++++ b/evidence/performance-0.3.0/round10-serial.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "serial",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0001029485,
++    0.000129693,
++    0.000107107,
++    0.00010508175,
++    0.0001008315,
++    9.923225e-05,
++    0.0001090575,
++    0.00024920575,
++    0.00013322075,
++    9.801975e-05,
++    0.000114595
++  ],
++  "after_seconds": [
++    8.67945e-05,
++    8.034025e-05,
++    0.0001035935,
++    8.040125e-05,
++    0.0001014395,
++    8.936725e-05,
++    9.00185e-05,
++    8.755175e-05,
++    8.117925e-05,
++    9.334625e-05,
++    7.850075e-05
++  ],
++  "medians_seconds": [
++    0.000107107,
++    8.755175e-05
++  ],
++  "speedup": 1.2233564720293997
++}
+diff --git a/src/domain.rs b/src/domain.rs
+index 10031b4..f23b7ba 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -26,6 +26,33 @@ const TRACE_LIMIT: usize = 10_000;
+ 
+ const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
+ 
++impl Metrics {
++    /// Append exactly the JSON text of `serde_json::to_string(self)`, with the keys
++    /// and the column list as pre-encoded bytes. Numbers and the trace go through
++    /// serde_json.
++    pub fn write_json(&self, out: &mut Vec<u8>) -> serde_json::Result<()> {
++        let numbers: [(&[u8], f64); 6] = [
++            (b"{\"integrated_error\":", self.integrated_error),
++            (
++                b",\"integrated_force_squared\":",
++                self.integrated_force_squared,
++            ),
++            (b",\"max_abs_force_n\":", self.max_abs_force_n),
++            (b",\"max_abs_position_m\":", self.max_abs_position_m),
++            (b",\"terminal_position_m\":", self.terminal_position_m),
++            (b",\"terminal_velocity_m_s\":", self.terminal_velocity_m_s),
++        ];
++        for (key, value) in numbers {
++            out.extend_from_slice(key);
++            serde_json::to_writer(&mut *out, &value)?;
++        }
++        out.extend_from_slice(b",\"trace\":");
++        serde_json::to_writer(&mut *out, &self.trace)?;
++        out.extend_from_slice(b",\"trace_columns\":[\"t_s\",\"x_m\",\"v_m_s\",\"held_force_n\"]}");
++        Ok(())
++    }
++}
++
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct Model {
+diff --git a/src/lib.rs b/src/lib.rs
+index 57eb3a6..6f2f1a2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -299,6 +299,56 @@ struct Batch<'a> {
+     version: &'static str,
+ }
+ 
++/// Append a static string that needs no JSON escaping, with quotes.
++fn write_plain(out: &mut Vec<u8>, text: &'static str) {
++    debug_assert!(
++        text.bytes()
++            .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b))
++    );
++    out.push(b'"');
++    out.extend_from_slice(text.as_bytes());
++    out.push(b'"');
++}
++
++impl Batch<'_> {
++    /// Append exactly the JSON text of `serde_json::to_string(self)`. Keys and
++    /// static strings are written as pre-encoded bytes in serde's field order;
++    /// ids, details, failure metrics and numbers go through serde_json.
++    fn write_json(&self, out: &mut Vec<u8>) -> serde_json::Result<()> {
++        out.extend_from_slice(b"{\"model_sha256\":");
++        serde_json::to_writer(&mut *out, self.model_sha256)?;
++        out.extend_from_slice(b",\"records\":[");
++        for (i, record) in self.records.iter().enumerate() {
++            if i > 0 {
++                out.push(b',');
++            }
++            out.extend_from_slice(b"{\"id\":");
++            serde_json::to_writer(&mut *out, record.id)?;
++            out.extend_from_slice(b",\"status\":");
++            write_plain(out, record.status);
++            out.extend_from_slice(b",\"steps\":");
++            serde_json::to_writer(&mut *out, &record.steps)?;
++            out.extend_from_slice(b",\"score\":");
++            serde_json::to_writer(&mut *out, &record.score)?;
++            out.extend_from_slice(b",\"metrics\":");
++            match &record.metrics {
++                None => out.extend_from_slice(b"null"),
++                Some(RecordMetrics::Domain(metrics)) => metrics.write_json(out)?,
++                Some(RecordMetrics::Json(value)) => serde_json::to_writer(&mut *out, value)?,
++            }
++            out.extend_from_slice(b",\"detail\":");
++            serde_json::to_writer(&mut *out, &record.detail)?;
++            out.push(b'}');
++        }
++        out.extend_from_slice(b"],\"schema\":");
++        write_plain(out, self.schema);
++        out.extend_from_slice(b",\"version\":");
++        write_plain(out, self.version);
++        out.push(b'}');
++        Ok(())
++    }
++}
++
+ /// One untraced candidate's outcome from `Prepared::score_matrix`.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct MatrixScore {
+@@ -408,8 +458,10 @@ impl Prepared {
+         budget: Budget,
+         metrics_enabled: bool,
+     ) -> Result<String, String> {
+-        serde_json::to_string(&self.evaluate(&candidates, budget, metrics_enabled)?)
+-            .map_err(|e| e.to_string())
++        let batch = self.evaluate(&candidates, budget, metrics_enabled)?;
++        let mut out = Vec::with_capacity(256 + batch.records.len() * 256);
++        batch.write_json(&mut out).map_err(|e| e.to_string())?;
++        String::from_utf8(out).map_err(|e| e.to_string())
+     }
+ 
+     /// Run one candidate's domain evaluation and return its classified result and steps.
+@@ -1231,6 +1283,71 @@ mod tests {
+         assert_eq!(error, reference.to_string());
+     }
+ 
++    #[test]
++    fn batch_writer_matches_serde_json() {
++        let example = fixture();
++        let parameters = &example["parameters"];
++        let check = |prepared: &Prepared, candidates: Value, budget: &str, metrics: bool| {
++            let candidates: Vec<Candidate> = serde_json::from_value(candidates).unwrap();
++            let budget: Budget = serde_json::from_str(budget).unwrap();
++            let batch = prepared.evaluate(&candidates, budget, metrics).unwrap();
++            let mut out = Vec::new();
++            batch.write_json(&mut out).unwrap();
++            assert_eq!(
++                String::from_utf8(out).unwrap(),
++                serde_json::to_string(&batch).unwrap()
++            );
++        };
++        let pd = Prepared::new(&example["model"].to_string()).unwrap();
++        let mixed = json!([
++            {"id": "plain", "parameters": parameters},
++            {"id": "esc\"aped\\id\n\u{e9}\u{1}", "parameters": parameters, "trace": true},
++            {"id": "bad", "parameters": vec![1.0; 63]},
++            {"id": "negative", "parameters": [-1.0, 2.0]},
++        ]);
++        let cancel = std::env::temp_dir().join(format!("writer-cancel-{}", std::process::id()));
++        std::fs::write(&cancel, b"").unwrap();
++        let cancel_budget = json!({"cancel_file": cancel}).to_string();
++        for budget in [
++            "{}",
++            r#"{"max_steps":5}"#,
++            r#"{"workers":2}"#,
++            &cancel_budget,
++        ] {
++            check(&pd, mixed.clone(), budget, true);
++            let untraced = json!([mixed[0], mixed[2], mixed[3]]);
++            check(&pd, untraced, budget, false);
++        }
++        std::fs::remove_file(&cancel).unwrap();
++        let mut held = example["model"].clone();
++        held["control"] = json!({"kind": "held", "switches_s": [0.4, 1.1]});
++        let held = Prepared::new(&held.to_string()).unwrap();
++        let forces = json!([
++            {"id": "ok", "parameters": [-1.0, -0.5, 0.0], "trace": true},
++            {"id": "far", "parameters": [3.0, 3.0, 3.0]},
++        ]);
++        check(&held, forces, "{}", true);
++        let detail = Batch {
++            model_sha256: "sha",
++            records: vec![Record {
++                id: "x",
++                status: "infeasible",
++                steps: 3,
++                score: None,
++                metrics: Some(RecordMetrics::Json(json!({"b": [1.5, null], "a": "q\"t"}))),
++                detail: Some("tab\tand \"quote\"".into()),
++            }],
++            schema: "robotics-control-craft.result/0.1",
++            version: "0.0.0",
++        };
++        let mut out = Vec::new();
++        detail.write_json(&mut out).unwrap();
++        assert_eq!(
++            String::from_utf8(out).unwrap(),
++            serde_json::to_string(&detail).unwrap()
++        );
++    }
++
+     #[test]
+     fn score_matrix_rejects_bad_shapes_and_budgets() {
+         let example = fixture();
+-- 
+2.43.0
+

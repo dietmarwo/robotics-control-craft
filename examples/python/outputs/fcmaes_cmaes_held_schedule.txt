@@ -1,0 +1,11 @@
+generation  25: best score 0.130989259
+generation  50: best score 0.123589665
+generation  75: best score 0.123202019
+generation 100: best score 0.123072148
+generation 125: best score 0.123058884
+generation 150: best score 0.123058854
+3600 schedules evaluated, 81 penalized
+best forces (N): [-3.0, 1.803, 1.3749, -0.123, 0.0102, 0.0036]
+replay score 0.123058854, terminal x -3.873e-04 m, v 1.468e-03 m/s, effort 7.0857 N^2 s
+hand-made brake-then-hold schedule: score 1.104367
+coarse traced replay at dt=0.1 s: 42 rows, forces in order [-3.0, 1.803, 1.3749, -0.123, 0.0102, 0.0036]

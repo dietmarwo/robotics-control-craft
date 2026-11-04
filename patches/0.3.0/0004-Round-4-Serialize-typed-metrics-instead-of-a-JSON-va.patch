@@ -1,0 +1,303 @@
+From a2ff3dfbf5d2d031da911d492d1972760429a486 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 11:50:40 -0400
+Subject: [PATCH 04/13] Round 4: Serialize typed metrics instead of a JSON
+ value map
+
+The domain returns a typed Metrics struct whose fields are declared in
+the alphabetical key order of the former serde_json::Value map, so
+records keep their exact bytes while skipping per-record key strings,
+map inserts and boxed numbers. Failure metrics keep the Value form
+behind an untagged enum. The trace remains a Value in this round. A
+unit test checks the metrics key order for traced and untraced rows.
+
+Workload: serial (96 full records, 62 steps each, one worker).
+Before median: 0.1834 ms. After median: 0.1062 ms. Speedup: 1.73x.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/plan.md            | 18 ++++++
+ .../performance-0.3.0/round04-serial.json     | 38 ++++++++++++
+ src/domain.rs                                 | 54 ++++++++++++----
+ src/lib.rs                                    | 62 ++++++++++++++++---
+ 4 files changed, 149 insertions(+), 23 deletions(-)
+ create mode 100644 evidence/performance-0.3.0/round04-serial.json
+
+diff --git a/evidence/performance-0.3.0/plan.md b/evidence/performance-0.3.0/plan.md
+index 9fc71fa..d7c7dd7 100644
+--- a/evidence/performance-0.3.0/plan.md
++++ b/evidence/performance-0.3.0/plan.md
+@@ -79,3 +79,21 @@ check passes. Otherwise revert it and record it under `rejected/`.
+   multiply, add and divide latency). The round therefore also widens
+   `domain::LANES` from four to eight, for both builds. The target
+   workload and the decision rule are unchanged.
++
++### Round 4: typed metrics records
++
++- Target workload: `serial` (96 full records, 62 steps each, one
++  worker), round 3 binary before, round 4 binary after, full mode.
++- Profile after round 3 (`serial` full, callgrind): string serialization
++  13%, allocation and free about 22%, `BTreeMap` inserts 5%, the lane
++  kernel 11%. Most of this is the per-record metrics `Value` map: eight
++  owned key strings, a four-string column list and boxed numbers.
++- Change: the domain returns a typed `Metrics` struct that serializes
++  directly. Its fields are declared in alphabetical order, the order a
++  `serde_json::Value` map produces, so the JSON bytes are unchanged. The
++  optional trace stays a `Value` in this round. Failure metrics keep the
++  `Value` form behind an untagged enum.
++- Expected effect: 1.3x to 1.6x on `serial` full; small gains on `one`
++  and the full domain workloads.
++- Floating-point results: unchanged (same kernel; serde_json formats the
++  same `f64` values with the same formatter).
+diff --git a/evidence/performance-0.3.0/round04-serial.json b/evidence/performance-0.3.0/round04-serial.json
+new file mode 100644
+index 0000000..99ee762
+--- /dev/null
++++ b/evidence/performance-0.3.0/round04-serial.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "serial",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.0001833765,
++    0.00022002925,
++    0.000178797,
++    0.0001443895,
++    0.000158789,
++    0.00016392725,
++    0.000140556,
++    0.00020708225,
++    0.000211895,
++    0.000183755,
++    0.000200372
++  ],
++  "after_seconds": [
++    0.00012369225,
++    0.00010618125,
++    0.00011644975,
++    9.0354e-05,
++    8.0102e-05,
++    8.28865e-05,
++    9.2756e-05,
++    9.2003e-05,
++    0.000133549,
++    0.00011311275,
++    0.00017855775
++  ],
++  "medians_seconds": [
++    0.0001833765,
++    0.00010618125
++  ],
++  "speedup": 1.7270139502030726
++}
+diff --git a/src/domain.rs b/src/domain.rs
+index 0a63d7e..fbfef71 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -1,6 +1,6 @@
+ use crate::{Evaluation, Failure, Work, infeasible, invalid};
+-use serde::Deserialize;
+-use serde_json::json;
++use serde::{Deserialize, Serialize};
++use serde_json::{Value, json};
+ pub const CAPABILITIES: &[&str] = &[
+     "bounded_mass_spring_damper",
+     "piecewise_constant_actuation",
+@@ -8,6 +8,22 @@ pub const CAPABILITIES: &[&str] = &[
+     "scenario_replay",
+ ];
+ 
++/// Diagnostics of a complete rollout. The fields are declared in alphabetical
++/// order, the key order of a `serde_json::Value` map, so records keep their bytes.
++#[derive(Serialize)]
++pub struct Metrics {
++    integrated_error: f64,
++    integrated_force_squared: f64,
++    max_abs_force_n: f64,
++    max_abs_position_m: f64,
++    terminal_position_m: f64,
++    terminal_velocity_m_s: f64,
++    trace: Value,
++    trace_columns: [&'static str; 4],
++}
++
++const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
++
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct Model {
+@@ -270,11 +286,15 @@ fn lanes(
+         done[l].take().unwrap_or_else(|| {
+             let terminal = (x[l] - target).powi(2) + 0.1 * v[l].powi(2);
+             let score = terminal + error[l] / m.horizon_s + 0.001 * effort[l];
+-            let metrics = work.metrics(|| {
+-                json!({
+-        "terminal_position_m":x[l],"terminal_velocity_m_s":v[l],"integrated_error":error[l],
+-        "integrated_force_squared":effort[l],"max_abs_position_m":max_abs_x[l],"max_abs_force_n":max_force[l],
+-        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":None::<Vec<[f64; 4]>>})
++            let metrics = work.metrics(|| Metrics {
++                integrated_error: error[l],
++                integrated_force_squared: effort[l],
++                max_abs_force_n: max_force[l],
++                max_abs_position_m: max_abs_x[l],
++                terminal_position_m: x[l],
++                terminal_velocity_m_s: v[l],
++                trace: Value::Null,
++                trace_columns: TRACE_COLUMNS,
+             });
+             (Ok((score, metrics)), work.used)
+         })
+@@ -347,11 +367,15 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
+     let terminal = (y[0] - m.target_m).powi(2) + 0.1 * y[1].powi(2);
+     Ok((
+         terminal + y[2] / m.horizon_s + 0.001 * effort,
+-        work.metrics(|| {
+-            json!({
+-        "terminal_position_m":y[0],"terminal_velocity_m_s":y[1],"integrated_error":y[2],
+-        "integrated_force_squared":effort,"max_abs_position_m":max_abs_x,"max_abs_force_n":max_force,
+-        "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":TRACE.then_some(trace)})
++        work.metrics(|| Metrics {
++            integrated_error: y[2],
++            integrated_force_squared: effort,
++            max_abs_force_n: max_force,
++            max_abs_position_m: max_abs_x,
++            terminal_position_m: y[0],
++            terminal_velocity_m_s: y[1],
++            trace: json!(TRACE.then_some(trace)),
++            trace_columns: TRACE_COLUMNS,
+         }),
+     ))
+ }
+@@ -412,7 +436,11 @@ mod tests {
+                 let text = |r: &[(Evaluation, u64); LANES]| {
+                     r.iter()
+                         .map(|(e, s)| match e {
+-                            Ok((score, metrics)) => format!("{s} {:x} {metrics}", score.to_bits()),
++                            Ok((score, metrics)) => format!(
++                                "{s} {:x} {}",
++                                score.to_bits(),
++                                serde_json::to_string(metrics).unwrap()
++                            ),
+                             Err(f) => format!("{s} {} {}", f.status, f.detail),
+                         })
+                         .collect::<Vec<_>>()
+diff --git a/src/lib.rs b/src/lib.rs
+index e26199b..4b644bb 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -14,7 +14,8 @@ use std::{
+     time::{Duration, Instant},
+ };
+ 
+-pub type Evaluation = Result<(f64, Value), Failure>;
++/// A domain result: objective and optional typed metrics, or a classified failure.
++pub(crate) type Evaluation = Result<(f64, Option<domain::Metrics>), Failure>;
+ 
+ #[derive(Debug, Clone)]
+ pub struct Failure {
+@@ -80,12 +81,11 @@ pub struct Work<'a> {
+     metrics_enabled: bool,
+ }
+ impl Work<'_> {
+-    pub fn metrics(&self, make: impl FnOnce() -> Value) -> Value {
+-        if self.metrics_enabled {
+-            make()
+-        } else {
+-            Value::Null
+-        }
++    pub(crate) fn metrics(
++        &self,
++        make: impl FnOnce() -> domain::Metrics,
++    ) -> Option<domain::Metrics> {
++        self.metrics_enabled.then(make)
+     }
+ 
+     #[inline]
+@@ -125,13 +125,21 @@ impl Work<'_> {
+     }
+ }
+ 
++/// Record metrics: typed domain metrics for complete rows, JSON for failures.
++#[derive(Serialize)]
++#[serde(untagged)]
++enum RecordMetrics {
++    Domain(domain::Metrics),
++    Json(Value),
++}
++
+ #[derive(Serialize)]
+ struct Record<'a> {
+     id: &'a str,
+     status: &'static str,
+     steps: u64,
+     score: Option<f64>,
+-    metrics: Option<Value>,
++    metrics: Option<RecordMetrics>,
+     detail: Option<String>,
+ }
+ 
+@@ -362,7 +370,7 @@ impl Prepared {
+                 status: "complete",
+                 steps,
+                 score: Some(score),
+-                metrics: Some(metrics),
++                metrics: metrics.map(RecordMetrics::Domain),
+                 detail: None,
+             },
+             Err(e) => Record {
+@@ -370,7 +378,11 @@ impl Prepared {
+                 status: e.status,
+                 steps,
+                 score: None,
+-                metrics: if metrics_enabled { e.metrics } else { None },
++                metrics: if metrics_enabled {
++                    e.metrics.map(RecordMetrics::Json)
++                } else {
++                    None
++                },
+                 detail: Some(e.detail),
+             },
+         }
+@@ -828,6 +840,36 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn metrics_keys_keep_sorted_json_order() {
++        let example = fixture();
++        let prepared = Prepared::new(&example["model"].to_string()).unwrap();
++        for trace in [false, true] {
++            let candidates = json!([{"id":"a","parameters":example["parameters"],"trace":trace}]);
++            let text = prepared
++                .evaluate_json(&candidates.to_string(), "{}")
++                .unwrap();
++            let keys = [
++                "integrated_error",
++                "integrated_force_squared",
++                "max_abs_force_n",
++                "max_abs_position_m",
++                "terminal_position_m",
++                "terminal_velocity_m_s",
++                "trace",
++                "trace_columns",
++            ];
++            let positions: Vec<_> = keys
++                .iter()
++                .map(|k| text.find(&format!("\"{k}\":")).unwrap())
++                .collect();
++            assert!(positions.windows(2).all(|w| w[0] < w[1]), "{text}");
++            let value: Value = serde_json::from_str(&text).unwrap();
++            let metrics = serde_json::to_string(&value["records"][0]["metrics"]).unwrap();
++            assert!(text.contains(&metrics), "{text}");
++        }
++    }
++
+     #[test]
+     fn score_matrix_rejects_bad_shapes_and_budgets() {
+         let example = fixture();
+-- 
+2.43.0
+

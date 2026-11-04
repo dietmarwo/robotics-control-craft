@@ -1,0 +1,28 @@
+model sha256: f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7
+grid rows: 357, statuses: {'complete': 357}
+steps per rollout: [62]
+
+five best gain pairs by score
+   kp     kd     score
+ 16.0   5.50  0.230627
+ 14.0   5.00  0.230648
+ 17.0   6.00  0.230660
+ 19.0   6.50  0.230726
+ 15.0   5.50  0.230752
+packaged gains [4, 2]: score 0.261834
+
+Pareto front of integrated error versus effort: 40 gain pairs
+   kp     kd   error(m^2 s)  effort(N^2 s)  peak |x| (m)
+  0.0   0.00      1.070654       0.000000  1.018773
+  2.0   2.00      0.640491       1.507964  1.005229
+  4.0   3.00      0.528042       3.183123  1.004752
+  6.0   3.50      0.487592       4.490294  1.004752
+  8.0   4.00      0.471273       5.630291  1.004752
+  9.0   3.50      0.461731       7.115050  1.004752
+ 13.0   5.00      0.457186       7.896908  1.004752
+ 17.0   6.00      0.454918       8.745706  1.004752
+
+best gains [16.0, 5.5]
+score at dt=0.04: 0.230627209 (62 steps)
+score at dt=0.02: 0.230627098 (104 steps)
+top-five ranking at half step: [0, 1, 2, 3, 4]

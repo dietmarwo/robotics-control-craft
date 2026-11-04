@@ -1,0 +1,22 @@
+{
+  "model": {
+    "mass_kg": 1,
+    "spring_n_per_m": 1,
+    "damping_ns_per_m": 0.4,
+    "initial_x_m": 1,
+    "initial_v_m_s": 0.2,
+    "target_m": 0,
+    "dt_s": 0.04,
+    "horizon_s": 2.05,
+    "force_limit_n": 3,
+    "position_limit_m": 2,
+    "control": {
+      "kind": "pd",
+      "interval_s": 0.1
+    }
+  },
+  "parameters": [
+    4,
+    2
+  ]
+}

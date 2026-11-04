@@ -1,0 +1,7 @@
+DE: best gains [79.950151, 22.961001], score 0.531785046
+DE: 1952 rows scored in 61 native calls, 29 failed rollouts penalized
+Nelder-Mead: gains [87.460109, 25.061778], score 0.531642326, 755 evaluations
+replay: status complete, steps 4030, peak position 1.779831 m (limit 2 m)
+        terminal x 1.779539 m, v -0.009384 m/s
+half-step replay score 0.531642326 (difference -2.07e-11)
+traced first second: 1000 rows, last row [1.0, 1.215101, 2.08164, 3.0]

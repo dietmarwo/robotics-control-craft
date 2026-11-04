@@ -1,0 +1,601 @@
+From 199781679240978888c57558687c024a50acb0f2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 12:00:09 -0400
+Subject: [PATCH 07/13] Round 7: Add a sixteen-lane AVX-512 lane kernel
+
+Make the lockstep lane kernel generic over its width. On hosts with
+AVX-512F, preparation selects a sixteen-lane build compiled with the
+avx512f target feature, which keeps two eight-lane dependency chains in
+32 vector registers; other hosts keep eight lanes with AVX2 or the
+baseline build. The engine groups rows and distributes worker ranges in
+units of the selected width. Rust does not contract multiplies and adds,
+so lanes perform the same IEEE operations and records stay
+byte-identical. A unit test compares the AVX-512, AVX2 and baseline
+kernels bit for bit; the lockstep test covers up to 18 rows per model.
+
+An earlier round 7 attempt (validated fast decoding of parameter
+arrays) measured 0.955x on the invalid workload and was reverted; its
+timing is in evidence/performance-0.3.0/rejected/.
+
+Workload: domain (48 full records, PD control, 4,000 RK4 steps each,
+one worker).
+Before median: 1.038 ms. After median: 0.705 ms. Speedup: 1.47x.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/plan.md            |  51 ++++
+ ...tempt-fast-parameter-decoding-invalid.json |  38 +++
+ .../performance-0.3.0/round07-domain.json     |  38 +++
+ src/domain.rs                                 | 219 +++++++++++-------
+ src/lib.rs                                    |  54 +++--
+ 5 files changed, 303 insertions(+), 97 deletions(-)
+ create mode 100644 evidence/performance-0.3.0/rejected/attempt-fast-parameter-decoding-invalid.json
+ create mode 100644 evidence/performance-0.3.0/round07-domain.json
+
+diff --git a/evidence/performance-0.3.0/plan.md b/evidence/performance-0.3.0/plan.md
+index 65d33c8..62a4b35 100644
+--- a/evidence/performance-0.3.0/plan.md
++++ b/evidence/performance-0.3.0/plan.md
+@@ -128,3 +128,54 @@ check passes. Otherwise revert it and record it under `rejected/`.
+ - Expected effect: one fewer thread spawn and join per batch; expect
+   1.15x to 1.3x on `parallel`.
+ - Floating-point results: unchanged.
++
++### Round 7: validated fast decoding of parameter arrays
++
++- Target workload: `invalid` (1,024 full records with 63 parameters
++  each, one worker), round 6 binary before, round 7 binary after, full
++  mode.
++- Profile after round 3 (`invalid`, callgrind): serde_json number
++  parsing about 45% (`parse_number`, `parse_integer`, the
++  `float_roundtrip` lexical path), sequence handling 15%, record
++  serialization most of the rest.
++- Change: decode candidate batches first with a twin of `Candidate`
++  whose `parameters` field is borrowed as a raw JSON slice, checked
++  against the strict JSON number-array grammar and parsed with
++  `str::parse::<f64>`. Both serde_json's `float_roundtrip` parser and
++  the standard library round correctly, so every finite value is the
++  same `f64`, including signed zeros and subnormals. If the fast decode
++  fails for any reason (other JSON, an infinite value, or any serde
++  error), the batch is decoded again with the original types, so
++  results and error messages are exactly the previous ones. The CLI
++  request path uses the same scheme.
++- Expected effect: 1.4x to 2x on `invalid`; smaller gains on lean and
++  full `serial`.
++- Floating-point results: unchanged (identical parsed values); unit
++  tests compare both decoders on edge cases and on 20,000 random bit
++  patterns in several notations.
++- Outcome: rejected at 0.955x (1.805 ms before, 1.890 ms after;
++  `rejected/attempt-fast-parameter-decoding-invalid.json`). The fast
++  path was taken, but the raw-slice scan plus `str::parse` costs more
++  instructions per short token than serde_json's own number parser. The
++  code was reverted; the next round reuses the number 7.
++
++### Round 7 (second attempt): AVX-512 lane kernel with sixteen lanes
++
++- Target workload: `domain` (48 full records, PD control, 4,000 RK4
++  steps each, one worker), round 6 binary before, round 7 binary after.
++- Diagnostics after round 3 (11-sample medians, informal): removing the
++  divisions saved only 8%, and AVX-512 with eight lanes (one register
++  per quantity, one dependency chain) matched AVX2 with eight lanes (two
++  chains). The kernel is bound by the step's dependency-chain latency.
++  AVX-512 with sixteen lanes keeps two chains of eight in 32 registers;
++  an informal build measured 1.25x on `domain` against round 6.
++- Change: make the lane kernel generic over its width. On hosts with
++  AVX-512F, preparation selects a sixteen-lane build compiled with
++  `avx512f`; otherwise eight lanes with AVX2 or the baseline build. The
++  engine groups and distributes work in ranges of the selected width.
++  Rust does not contract multiplies and adds even though `avx512f`
++  implies FMA support, so lanes perform the same IEEE operations.
++- Expected effect: 1.15x to 1.3x on `domain`; batches smaller than
++  sixteen run as padded groups.
++- Floating-point results: bit-identical; a unit test compares the
++  AVX-512, AVX2 and baseline kernels bit for bit.
+diff --git a/evidence/performance-0.3.0/rejected/attempt-fast-parameter-decoding-invalid.json b/evidence/performance-0.3.0/rejected/attempt-fast-parameter-decoding-invalid.json
+new file mode 100644
+index 0000000..3745d80
+--- /dev/null
++++ b/evidence/performance-0.3.0/rejected/attempt-fast-parameter-decoding-invalid.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "invalid",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.001335241,
++    0.0013205013333333333,
++    0.0013151523333333334,
++    0.0020581291666666667,
++    0.0017131560000000002,
++    0.0021326318333333336,
++    0.0021979465000000003,
++    0.0024580701666666667,
++    0.0021087055,
++    0.0013118881666666666,
++    0.0018048403333333334
++  ],
++  "after_seconds": [
++    0.0018437243333333335,
++    0.0017418671666666666,
++    0.0017448576666666668,
++    0.0019368713333333335,
++    0.003123118333333333,
++    0.0029754434999999997,
++    0.002626637666666667,
++    0.0031728378333333337,
++    0.0017774501666666667,
++    0.0017394075,
++    0.0018898355
++  ],
++  "medians_seconds": [
++    0.0018048403333333334,
++    0.0018898355
++  ],
++  "speedup": 0.955025097863456
++}
+diff --git a/evidence/performance-0.3.0/round07-domain.json b/evidence/performance-0.3.0/round07-domain.json
+new file mode 100644
+index 0000000..e5f80a7
+--- /dev/null
++++ b/evidence/performance-0.3.0/round07-domain.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "domain",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.001018127,
++    0.0010214859999999998,
++    0.0014392062,
++    0.0009963828,
++    0.0011094224,
++    0.001022788,
++    0.0014635996,
++    0.0010648194,
++    0.0010131915999999999,
++    0.0010380514,
++    0.0010528614000000001
++  ],
++  "after_seconds": [
++    0.0006451412,
++    0.0006456736,
++    0.0008790654,
++    0.0006681558,
++    0.0007349664,
++    0.0007410800000000001,
++    0.0007134858,
++    0.0007045636,
++    0.0006957672,
++    0.0010424192,
++    0.0006726522
++  ],
++  "medians_seconds": [
++    0.0010380514,
++    0.0007045636
++  ],
++  "speedup": 1.473325332163058
++}
+diff --git a/src/domain.rs b/src/domain.rs
+index d5dcafd..9a19bb1 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -45,6 +45,9 @@ pub struct Model {
+     /// The host supports AVX2, detected once at preparation.
+     #[serde(skip)]
+     avx2: bool,
++    /// The host supports AVX-512F, detected once at preparation.
++    #[serde(skip)]
++    avx512: bool,
+ }
+ #[derive(Deserialize)]
+ #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+@@ -92,12 +95,20 @@ pub fn prepare(mut model: Model) -> Result<Model, String> {
+     #[cfg(target_arch = "x86_64")]
+     {
+         model.avx2 = std::arch::is_x86_feature_detected!("avx2");
++        model.avx512 = std::arch::is_x86_feature_detected!("avx512f");
+     }
+     Ok(model)
+ }
+ 
+-/// Number of untraced candidates that `evaluate_lanes` integrates in lockstep.
+-pub const LANES: usize = 8;
++/// Lockstep width of the AVX2 and baseline lane kernels.
++const LANES: usize = 8;
++/// Lockstep width of the AVX-512 lane kernel, the largest width.
++pub const MAX_LANES: usize = 16;
++
++/// Number of untraced candidates `evaluate_lanes` integrates together on this host.
++pub fn lane_width(m: &Model) -> usize {
++    if m.avx512 { MAX_LANES } else { LANES }
++}
+ 
+ pub fn evaluate(m: &Model, parameters: &[f64], trace: bool, work: &mut Work<'_>) -> Evaluation {
+     check(m, parameters)?;
+@@ -130,28 +141,50 @@ pub fn check(m: &Model, parameters: &[f64]) -> Result<(), Failure> {
+     Ok(())
+ }
+ 
+-/// Integrate `LANES` untraced candidates that passed `check` in lockstep.
++/// Integrate up to `lane_width(m)` untraced candidates that passed `check` in
++/// lockstep and emit each lane's evaluation and steps.
+ ///
+ /// All lanes share the model's control and time grid, so one step counter
+ /// serves the group. Every lane performs the scalar kernel's floating-point
+ /// operations in the same order, which keeps results bit-identical. A lane
+-/// that fails keeps the step count reached at that point. `work` must be
+-/// unmonitored and unused.
++/// that fails keeps the step count reached at that point. Unused lanes repeat
++/// the last row and are not emitted. `work` must be unmonitored and unused.
+ pub fn evaluate_lanes(
+     m: &Model,
+-    parameters: [&[f64]; LANES],
++    parameters: &[&[f64]],
+     work: &mut Work<'_>,
+-) -> [(Evaluation, u64); LANES] {
++    mut emit: impl FnMut(usize, Evaluation, u64),
++) {
++    let filled = parameters.len();
++    assert!((1..=lane_width(m)).contains(&filled), "lane group size");
++    #[cfg(target_arch = "x86_64")]
++    if m.avx512 {
++        let rows = std::array::from_fn(|l| parameters[l.min(filled - 1)]);
++        // SAFETY: `prepare` detected AVX-512F support on this host.
++        let results = unsafe { lanes_avx512(m, rows, work) };
++        for (lane, (result, steps)) in results.into_iter().enumerate().take(filled) {
++            emit(lane, result, steps);
++        }
++        return;
++    }
++    let rows = std::array::from_fn(|l| parameters[l.min(filled - 1)]);
+     #[cfg(target_arch = "x86_64")]
+-    if m.avx2 {
++    let results = if m.avx2 {
+         // SAFETY: `prepare` detected AVX2 support on this host.
+-        return unsafe { lanes_avx2(m, parameters, work) };
++        unsafe { lanes_avx2(m, rows, work) }
++    } else {
++        lanes::<LANES>(m, rows, work)
++    };
++    #[cfg(not(target_arch = "x86_64"))]
++    let results = lanes::<LANES>(m, rows, work);
++    for (lane, (result, steps)) in results.into_iter().enumerate().take(filled) {
++        emit(lane, result, steps);
+     }
+-    lanes(m, parameters, work)
+ }
+ 
+-/// The lane kernel compiled for AVX2. AVX2 does not enable fused multiply-add,
+-/// and Rust does not contract operations, so results equal the baseline build.
++/// The eight-lane kernel compiled for AVX2. AVX2 does not enable fused
++/// multiply-add, and Rust does not contract operations, so results equal the
++/// baseline build.
+ #[cfg(target_arch = "x86_64")]
+ #[target_feature(enable = "avx2")]
+ fn lanes_avx2(
+@@ -162,13 +195,24 @@ fn lanes_avx2(
+     lanes(m, parameters, work)
+ }
+ 
++/// The sixteen-lane kernel compiled for AVX-512F. Rust does not contract
++/// multiplies and adds into fused operations, so results equal the baseline.
++#[cfg(target_arch = "x86_64")]
++#[target_feature(enable = "avx512f")]
++fn lanes_avx512(
++    m: &Model,
++    parameters: [&[f64]; MAX_LANES],
++    work: &mut Work<'_>,
++) -> [(Evaluation, u64); MAX_LANES] {
++    lanes(m, parameters, work)
++}
++
+ #[inline(always)]
+-fn lanes(
++fn lanes<const N: usize>(
+     m: &Model,
+-    parameters: [&[f64]; LANES],
++    parameters: [&[f64]; N],
+     work: &mut Work<'_>,
+-) -> [(Evaluation, u64); LANES] {
+-    const N: usize = LANES;
++) -> [(Evaluation, u64); N] {
+     let fmax = m.force_limit_n;
+     let (k, c, inverse_mass, target) = (
+         m.spring_n_per_m,
+@@ -176,7 +220,7 @@ fn lanes(
+         m.inverse_mass,
+         m.target_m,
+     );
+-    let mut done: [Option<(Evaluation, u64)>; N] = Default::default();
++    let mut done: [Option<(Evaluation, u64)>; N] = std::array::from_fn(|_| None);
+     let mut alive = [true; N];
+     let mut remaining = N;
+     let mut t = 0.0_f64;
+@@ -400,72 +444,85 @@ mod tests {
+     use super::*;
+     use crate::Budget;
+ 
++    /// Render lane results with exact score bits and serialized metrics.
++    fn text(results: &[(Evaluation, u64)]) -> Vec<String> {
++        results
++            .iter()
++            .map(|(e, s)| match e {
++                Ok((score, metrics)) => format!(
++                    "{s} {:x} {}",
++                    score.to_bits(),
++                    serde_json::to_string(metrics).unwrap()
++                ),
++                Err(f) => format!("{s} {} {}", f.status, f.detail),
++            })
++            .collect()
++    }
++
+     #[test]
+-    fn avx2_lanes_equal_baseline_lanes() {
+-        #[cfg(target_arch = "x86_64")]
+-        if std::arch::is_x86_feature_detected!("avx2") {
+-            let budget = Budget::default();
+-            let fresh = || Work {
+-                budget: &budget,
+-                deadline: None,
+-                used: 0,
+-                monitored: false,
+-                metrics_enabled: true,
+-            };
+-            let base = r#"{"mass_kg":1,"spring_n_per_m":1,"damping_ns_per_m":0.4,
+-                "initial_x_m":0,"initial_v_m_s":0.2,"target_m":1.8,"dt_s":0.01,
+-                "horizon_s":3,"force_limit_n":3,"position_limit_m":2,"control":"#;
+-            let pd = prepare(
+-                serde_json::from_str(&format!(r#"{base}{{"kind":"pd","interval_s":0.1}}}}"#))
+-                    .unwrap(),
+-            )
+-            .unwrap();
+-            let held = prepare(
+-                serde_json::from_str(&format!(
+-                    r#"{base}{{"kind":"held","switches_s":[0.4,1.1]}}}}"#
+-                ))
+-                .unwrap(),
+-            )
+-            .unwrap();
+-            let gains: Vec<[f64; 2]> = (0..LANES)
+-                .map(|l| [0.5 + 2.5 * l as f64, 1.5 - 0.15 * l as f64])
+-                .collect();
+-            let forces: Vec<[f64; 3]> = (0..LANES)
+-                .map(|l| {
+-                    [
+-                        3.0 - 0.7 * l as f64,
+-                        0.4 * l as f64 - 1.0,
+-                        1.0 + 0.2 * l as f64,
+-                    ]
+-                })
++    fn vector_lane_kernels_equal_baseline_lanes() {
++        let budget = Budget::default();
++        let fresh = || Work {
++            budget: &budget,
++            deadline: None,
++            used: 0,
++            monitored: false,
++            metrics_enabled: true,
++        };
++        let base = r#"{"mass_kg":1,"spring_n_per_m":1,"damping_ns_per_m":0.4,
++            "initial_x_m":0,"initial_v_m_s":0.2,"target_m":1.8,"dt_s":0.01,
++            "horizon_s":3,"force_limit_n":3,"position_limit_m":2,"control":"#;
++        let pd = prepare(
++            serde_json::from_str(&format!(r#"{base}{{"kind":"pd","interval_s":0.1}}}}"#)).unwrap(),
++        )
++        .unwrap();
++        let held = prepare(
++            serde_json::from_str(&format!(
++                r#"{base}{{"kind":"held","switches_s":[0.4,1.1]}}}}"#
++            ))
++            .unwrap(),
++        )
++        .unwrap();
++        let gains: Vec<[f64; 2]> = (0..MAX_LANES)
++            .map(|l| [0.5 + 1.25 * l as f64, 1.5 - 0.08 * l as f64])
++            .collect();
++        let forces: Vec<[f64; 3]> = (0..MAX_LANES)
++            .map(|l| {
++                [
++                    3.0 - 0.35 * l as f64,
++                    0.2 * l as f64 - 1.0,
++                    1.0 + 0.1 * l as f64,
++                ]
++            })
++            .collect();
++        for (model, rows) in [
++            (&pd, gains.iter().map(|g| &g[..]).collect::<Vec<_>>()),
++            (&held, forces.iter().map(|f| &f[..]).collect()),
++        ] {
++            let wide: [&[f64]; MAX_LANES] = std::array::from_fn(|l| rows[l]);
++            let baseline = lanes(model, wide, &mut fresh());
++            let statuses: Vec<_> = baseline
++                .iter()
++                .map(|(e, _)| e.as_ref().map_or_else(|f| f.status, |_| "complete"))
+                 .collect();
+-            for (model, rows) in [
+-                (&pd, gains.iter().map(|g| &g[..]).collect::<Vec<_>>()),
+-                (&held, forces.iter().map(|f| &f[..]).collect()),
+-            ] {
+-                let parameters: [&[f64]; LANES] = std::array::from_fn(|l| rows[l]);
+-                let (mut a, mut b) = (fresh(), fresh());
+-                let baseline = lanes(model, parameters, &mut a);
+-                // SAFETY: AVX2 support was detected above.
+-                let avx2 = unsafe { lanes_avx2(model, parameters, &mut b) };
+-                let text = |r: &[(Evaluation, u64); LANES]| {
+-                    r.iter()
+-                        .map(|(e, s)| match e {
+-                            Ok((score, metrics)) => format!(
+-                                "{s} {:x} {}",
+-                                score.to_bits(),
+-                                serde_json::to_string(metrics).unwrap()
+-                            ),
+-                            Err(f) => format!("{s} {} {}", f.status, f.detail),
+-                        })
+-                        .collect::<Vec<_>>()
+-                };
+-                assert_eq!(text(&baseline), text(&avx2));
+-                let statuses: Vec<_> = baseline
+-                    .iter()
+-                    .map(|(e, _)| e.as_ref().map_or_else(|f| f.status, |_| "complete"))
+-                    .collect();
+-                assert!(statuses.contains(&"complete") && statuses.contains(&"infeasible"));
++            assert!(statuses.contains(&"complete") && statuses.contains(&"infeasible"));
++            let narrow: [&[f64]; LANES] = std::array::from_fn(|l| rows[l]);
++            assert_eq!(
++                text(&lanes(model, narrow, &mut fresh())),
++                text(&baseline[..LANES])
++            );
++            #[cfg(target_arch = "x86_64")]
++            {
++                if std::arch::is_x86_feature_detected!("avx2") {
++                    // SAFETY: AVX2 support was detected above.
++                    let avx2 = unsafe { lanes_avx2(model, narrow, &mut fresh()) };
++                    assert_eq!(text(&avx2), text(&baseline[..LANES]));
++                }
++                if std::arch::is_x86_feature_detected!("avx512f") {
++                    // SAFETY: AVX-512F support was detected above.
++                    let avx512 = unsafe { lanes_avx512(model, wide, &mut fresh()) };
++                    assert_eq!(text(&avx512), text(&baseline));
++                }
+             }
+         }
+     }
+diff --git a/src/lib.rs b/src/lib.rs
+index 5b0f8c1..5db8af2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -289,8 +289,9 @@ impl Prepared {
+     /// Emit the classified outcome of every row in `range`, keyed by row index.
+     ///
+     /// Without a deadline or cancel file, untraced rows whose parameters pass the
+-    /// domain check are integrated `domain::LANES` at a time in lockstep. Traced
+-    /// rows, monitored budgets and a single leftover row use the scalar kernel.
++    /// domain check are integrated `domain::lane_width` at a time in lockstep.
++    /// Traced rows, monitored budgets and a single leftover row use the scalar
++    /// kernel.
+     fn outcomes<'p>(
+         &self,
+         range: Range<usize>,
+@@ -301,7 +302,8 @@ impl Prepared {
+         mut emit: impl FnMut(usize, Evaluation, u64),
+     ) {
+         let lockstep = deadline.is_none() && budget.cancel_file.is_none();
+-        let mut group = [0usize; domain::LANES];
++        let width = domain::lane_width(&self.model);
++        let mut group = [0usize; domain::MAX_LANES];
+         let mut filled = 0;
+         for index in range {
+             let (parameters, trace) = row(index);
+@@ -317,8 +319,8 @@ impl Prepared {
+             }
+             group[filled] = index;
+             filled += 1;
+-            if filled == domain::LANES {
+-                self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit);
++            if filled == width {
++                self.lanes(&group[..filled], &row, budget, metrics_enabled, &mut emit);
+                 filled = 0;
+             }
+         }
+@@ -329,21 +331,23 @@ impl Prepared {
+                     self.outcome(row(group[0]).0, false, budget, None, metrics_enabled);
+                 emit(group[0], result, steps);
+             }
+-            _ => self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit),
++            _ => self.lanes(&group[..filled], &row, budget, metrics_enabled, &mut emit),
+         }
+     }
+ 
+-    /// Integrate the first `filled` rows of `group` in lockstep, padding unused lanes.
++    /// Integrate the rows of `group` in lockstep.
+     fn lanes<'p>(
+         &self,
+-        group: &[usize; domain::LANES],
+-        filled: usize,
++        group: &[usize],
+         row: &impl Fn(usize) -> (&'p [f64], bool),
+         budget: &Budget,
+         metrics_enabled: bool,
+         emit: &mut impl FnMut(usize, Evaluation, u64),
+     ) {
+-        let parameters = std::array::from_fn(|lane| row(group[lane.min(filled - 1)]).0);
++        let mut parameters: [&[f64]; domain::MAX_LANES] = [&[]; domain::MAX_LANES];
++        for (slot, &index) in parameters.iter_mut().zip(group) {
++            *slot = row(index).0;
++        }
+         let mut work = Work {
+             budget,
+             deadline: None,
+@@ -351,10 +355,12 @@ impl Prepared {
+             metrics_enabled,
+             monitored: false,
+         };
+-        let results = domain::evaluate_lanes(&self.model, parameters, &mut work);
+-        for (lane, (result, steps)) in results.into_iter().enumerate().take(filled) {
+-            emit(group[lane], finite_objective(result), steps);
+-        }
++        domain::evaluate_lanes(
++            &self.model,
++            &parameters[..group.len()],
++            &mut work,
++            |lane, result, steps| emit(group[lane], finite_objective(result), steps),
++        );
+     }
+ 
+     fn record<'a>(
+@@ -390,7 +396,7 @@ impl Prepared {
+ 
+     /// Produce one item per index in index order. `fill` emits the items of an
+     /// index range; it runs inline, or on the calling thread plus scoped workers
+-    /// that claim ranges of `domain::LANES` indexes.
++    /// that claim ranges of one lockstep group width.
+     fn dispatch<T: Send + Sync>(
+         &self,
+         count: usize,
+@@ -405,7 +411,7 @@ impl Prepared {
+                 .map(|item| item.expect("missing evaluation"))
+                 .collect();
+         }
+-        let chunk = domain::LANES;
++        let chunk = domain::lane_width(&self.model);
+         let next = AtomicUsize::new(0);
+         let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
+         let claim = || {
+@@ -797,6 +803,14 @@ mod tests {
+             json!([25.0, 0.1]),
+             json!([12.0, 0.2]),
+             json!([3.0, 0.0]),
++            json!([5.0, 2.5]),
++            json!([15.0, 0.3]),
++            json!([0.5, 0.5]),
++            json!([7.5, 1.0]),
++            json!([30.0, 0.05]),
++            json!([1.0, 4.0]),
++            json!([20.0, 0.0]),
++            json!([8.0, 2.0]),
+         ];
+         assert_lanes_match_scalar(&pd, &rows, json!({}));
+         assert_lanes_match_scalar(&pd, &rows, json!({"max_steps": 30}));
+@@ -816,6 +830,14 @@ mod tests {
+             json!([-0.5, 0.5, 2.0]),
+             json!([2.9, 2.9, 2.9]),
+             json!([0.1, 0.2, 0.3]),
++            json!([1.5, -1.5, 1.0]),
++            json!([2.0, 2.0, 2.0]),
++            json!([-2.5, 0.0, 2.5]),
++            json!([0.0, 3.0, 0.0]),
++            json!([3.0, -3.0, 1.9]),
++            json!([0.7, 0.7, 0.7]),
++            json!([-1.0, 1.0, -1.0]),
++            json!([2.2, 1.1, 0.0]),
+         ];
+         assert_lanes_match_scalar(&held, &rows, json!({}));
+         assert_lanes_match_scalar(&held, &rows, json!({"max_steps": 20}));
+-- 
+2.43.0
+
