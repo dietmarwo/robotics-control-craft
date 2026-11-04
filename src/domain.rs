@@ -26,6 +26,33 @@ const TRACE_LIMIT: usize = 10_000;
 
 const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
 
+impl Metrics {
+    /// Append exactly the JSON text of `serde_json::to_string(self)`, with the keys
+    /// and the column list as pre-encoded bytes. Numbers and the trace go through
+    /// serde_json.
+    pub fn write_json(&self, out: &mut Vec<u8>) -> serde_json::Result<()> {
+        let numbers: [(&[u8], f64); 6] = [
+            (b"{\"integrated_error\":", self.integrated_error),
+            (
+                b",\"integrated_force_squared\":",
+                self.integrated_force_squared,
+            ),
+            (b",\"max_abs_force_n\":", self.max_abs_force_n),
+            (b",\"max_abs_position_m\":", self.max_abs_position_m),
+            (b",\"terminal_position_m\":", self.terminal_position_m),
+            (b",\"terminal_velocity_m_s\":", self.terminal_velocity_m_s),
+        ];
+        for (key, value) in numbers {
+            out.extend_from_slice(key);
+            serde_json::to_writer(&mut *out, &value)?;
+        }
+        out.extend_from_slice(b",\"trace\":");
+        serde_json::to_writer(&mut *out, &self.trace)?;
+        out.extend_from_slice(b",\"trace_columns\":[\"t_s\",\"x_m\",\"v_m_s\",\"held_force_n\"]}");
+        Ok(())
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Model {

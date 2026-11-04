@@ -299,6 +299,56 @@ struct Batch<'a> {
     version: &'static str,
 }
 
+/// Append a static string that needs no JSON escaping, with quotes.
+fn write_plain(out: &mut Vec<u8>, text: &'static str) {
+    debug_assert!(
+        text.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b))
+    );
+    out.push(b'"');
+    out.extend_from_slice(text.as_bytes());
+    out.push(b'"');
+}
+
+impl Batch<'_> {
+    /// Append exactly the JSON text of `serde_json::to_string(self)`. Keys and
+    /// static strings are written as pre-encoded bytes in serde's field order;
+    /// ids, details, failure metrics and numbers go through serde_json.
+    fn write_json(&self, out: &mut Vec<u8>) -> serde_json::Result<()> {
+        out.extend_from_slice(b"{\"model_sha256\":");
+        serde_json::to_writer(&mut *out, self.model_sha256)?;
+        out.extend_from_slice(b",\"records\":[");
+        for (i, record) in self.records.iter().enumerate() {
+            if i > 0 {
+                out.push(b',');
+            }
+            out.extend_from_slice(b"{\"id\":");
+            serde_json::to_writer(&mut *out, record.id)?;
+            out.extend_from_slice(b",\"status\":");
+            write_plain(out, record.status);
+            out.extend_from_slice(b",\"steps\":");
+            serde_json::to_writer(&mut *out, &record.steps)?;
+            out.extend_from_slice(b",\"score\":");
+            serde_json::to_writer(&mut *out, &record.score)?;
+            out.extend_from_slice(b",\"metrics\":");
+            match &record.metrics {
+                None => out.extend_from_slice(b"null"),
+                Some(RecordMetrics::Domain(metrics)) => metrics.write_json(out)?,
+                Some(RecordMetrics::Json(value)) => serde_json::to_writer(&mut *out, value)?,
+            }
+            out.extend_from_slice(b",\"detail\":");
+            serde_json::to_writer(&mut *out, &record.detail)?;
+            out.push(b'}');
+        }
+        out.extend_from_slice(b"],\"schema\":");
+        write_plain(out, self.schema);
+        out.extend_from_slice(b",\"version\":");
+        write_plain(out, self.version);
+        out.push(b'}');
+        Ok(())
+    }
+}
+
 /// One untraced candidate's outcome from `Prepared::score_matrix`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MatrixScore {
@@ -408,8 +458,10 @@ impl Prepared {
         budget: Budget,
         metrics_enabled: bool,
     ) -> Result<String, String> {
-        serde_json::to_string(&self.evaluate(&candidates, budget, metrics_enabled)?)
-            .map_err(|e| e.to_string())
+        let batch = self.evaluate(&candidates, budget, metrics_enabled)?;
+        let mut out = Vec::with_capacity(256 + batch.records.len() * 256);
+        batch.write_json(&mut out).map_err(|e| e.to_string())?;
+        String::from_utf8(out).map_err(|e| e.to_string())
     }
 
     /// Run one candidate's domain evaluation and return its classified result and steps.
@@ -1229,6 +1281,71 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error, reference.to_string());
+    }
+
+    #[test]
+    fn batch_writer_matches_serde_json() {
+        let example = fixture();
+        let parameters = &example["parameters"];
+        let check = |prepared: &Prepared, candidates: Value, budget: &str, metrics: bool| {
+            let candidates: Vec<Candidate> = serde_json::from_value(candidates).unwrap();
+            let budget: Budget = serde_json::from_str(budget).unwrap();
+            let batch = prepared.evaluate(&candidates, budget, metrics).unwrap();
+            let mut out = Vec::new();
+            batch.write_json(&mut out).unwrap();
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                serde_json::to_string(&batch).unwrap()
+            );
+        };
+        let pd = Prepared::new(&example["model"].to_string()).unwrap();
+        let mixed = json!([
+            {"id": "plain", "parameters": parameters},
+            {"id": "esc\"aped\\id\n\u{e9}\u{1}", "parameters": parameters, "trace": true},
+            {"id": "bad", "parameters": vec![1.0; 63]},
+            {"id": "negative", "parameters": [-1.0, 2.0]},
+        ]);
+        let cancel = std::env::temp_dir().join(format!("writer-cancel-{}", std::process::id()));
+        std::fs::write(&cancel, b"").unwrap();
+        let cancel_budget = json!({"cancel_file": cancel}).to_string();
+        for budget in [
+            "{}",
+            r#"{"max_steps":5}"#,
+            r#"{"workers":2}"#,
+            &cancel_budget,
+        ] {
+            check(&pd, mixed.clone(), budget, true);
+            let untraced = json!([mixed[0], mixed[2], mixed[3]]);
+            check(&pd, untraced, budget, false);
+        }
+        std::fs::remove_file(&cancel).unwrap();
+        let mut held = example["model"].clone();
+        held["control"] = json!({"kind": "held", "switches_s": [0.4, 1.1]});
+        let held = Prepared::new(&held.to_string()).unwrap();
+        let forces = json!([
+            {"id": "ok", "parameters": [-1.0, -0.5, 0.0], "trace": true},
+            {"id": "far", "parameters": [3.0, 3.0, 3.0]},
+        ]);
+        check(&held, forces, "{}", true);
+        let detail = Batch {
+            model_sha256: "sha",
+            records: vec![Record {
+                id: "x",
+                status: "infeasible",
+                steps: 3,
+                score: None,
+                metrics: Some(RecordMetrics::Json(json!({"b": [1.5, null], "a": "q\"t"}))),
+                detail: Some("tab\tand \"quote\"".into()),
+            }],
+            schema: "robotics-control-craft.result/0.1",
+            version: "0.0.0",
+        };
+        let mut out = Vec::new();
+        detail.write_json(&mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            serde_json::to_string(&detail).unwrap()
+        );
     }
 
     #[test]

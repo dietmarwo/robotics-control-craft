@@ -222,3 +222,24 @@ check passes. Otherwise revert it and record it under `rejected/`.
   `domain2`.
 - Expected effect: 1.05x to 1.15x on `domain`.
 - Floating-point results: bit-identical.
+
+### Round 10: write batch JSON with pre-encoded keys
+
+- Target workload: `serial` (96 full records, 62 steps each, one
+  worker), round 9 binary before, round 10 binary after, full mode.
+- Profile after round 9 (callgrind): `format_escaped_str` alone is 12%
+  of `one` and 9% of lean `serial`. serde_json escape-scans every
+  struct key and static string of every record (six record keys, eight
+  metrics keys, four column names, status strings).
+- Change: `Batch::write_json` writes the envelope, record and metrics
+  keys, the status strings and the trace column list as pre-encoded
+  bytes, in serde's field order. Values that can need escaping or
+  formatting (ids, details, failure metrics, numbers and traces) still
+  go through serde_json, so floats and strings use the same formatter.
+  `evaluate_json` and `scores_json` use it; the CLI `Value` path keeps
+  the derived serializer. A unit test requires byte equality with
+  `serde_json::to_string` for complete, failed, traced and lean
+  batches.
+- Expected effect: 1.1x to 1.25x on `serial` full; smaller gains on
+  lean and `invalid`.
+- Floating-point results: unchanged (same formatter).
