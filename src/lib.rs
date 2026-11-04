@@ -1,6 +1,6 @@
 mod domain;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json, value::RawValue};
 use sha2::{Digest, Sha256};
 use std::{
@@ -52,6 +52,154 @@ pub struct Candidate {
     pub parameters: Vec<f64>,
     #[serde(default)]
     pub trace: bool,
+}
+
+/// `Candidate` with `parameters` decoded by `fast_parameters`; see `decode`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FastCandidate {
+    id: String,
+    #[serde(deserialize_with = "fast_parameters")]
+    parameters: Vec<f64>,
+    #[serde(default)]
+    trace: bool,
+}
+
+impl From<FastCandidate> for Candidate {
+    fn from(c: FastCandidate) -> Self {
+        Self {
+            id: c.id,
+            parameters: c.parameters,
+            trace: c.trace,
+        }
+    }
+}
+
+/// Borrow a parameter array as raw JSON and parse it with `parse_numbers`.
+fn fast_parameters<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f64>, D::Error> {
+    let raw = <&'de RawValue>::deserialize(deserializer)?;
+    parse_numbers(raw.get()).ok_or_else(|| serde::de::Error::custom("use the reference decoder"))
+}
+
+/// Powers of ten that are exact doubles.
+const EXACT_POWERS_OF_TEN: [f64; 23] = [
+    1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+    1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+];
+
+/// Parse a JSON array of finite numbers under the strict JSON grammar, or decline.
+///
+/// A number with at most 19 digits is read as an integer `m` and a decimal
+/// exponent `e`. When `m <= 2^53` and `|e| <= 22`, both `m` and `10^|e|` are
+/// exact doubles, so one multiply or divide yields the correctly rounded value
+/// (Clinger's fast path). Other numbers use `str::parse`, which also rounds
+/// correctly. serde_json's `float_roundtrip` parser rounds correctly too, so
+/// both decoders agree on every finite value, including signed zeros.
+/// Non-numbers, nesting and out-of-range values return `None`.
+fn parse_numbers(text: &str) -> Option<Vec<f64>> {
+    let b = text.as_bytes();
+    let space = |mut i: usize| {
+        while let Some(b' ' | b'\t' | b'\n' | b'\r') = b.get(i) {
+            i += 1;
+        }
+        i
+    };
+    if b.first() != Some(&b'[') {
+        return None;
+    }
+    let mut values = Vec::with_capacity((b.len() / 4).min(64));
+    let mut i = space(1);
+    if b.get(i) == Some(&b']') {
+        return (i + 1 == b.len()).then_some(values);
+    }
+    loop {
+        let start = i;
+        let negative = b.get(i) == Some(&b'-');
+        i += usize::from(negative);
+        let mut mantissa = 0u64;
+        let first = i;
+        match b.get(i) {
+            Some(b'0') => i += 1,
+            Some(b'1'..=b'9') => {
+                while let Some(&c @ b'0'..=b'9') = b.get(i) {
+                    mantissa = mantissa.wrapping_mul(10).wrapping_add(u64::from(c - b'0'));
+                    i += 1;
+                }
+            }
+            _ => return None,
+        }
+        let mut digits = i - first;
+        let mut exponent = 0i64;
+        if b.get(i) == Some(&b'.') {
+            i += 1;
+            let fraction = i;
+            while let Some(&c @ b'0'..=b'9') = b.get(i) {
+                mantissa = mantissa.wrapping_mul(10).wrapping_add(u64::from(c - b'0'));
+                i += 1;
+            }
+            if i == fraction {
+                return None;
+            }
+            digits += i - fraction;
+            exponent = -((i - fraction) as i64);
+        }
+        if let Some(b'e' | b'E') = b.get(i) {
+            i += 1;
+            let negative_exponent = b.get(i) == Some(&b'-');
+            if let Some(b'+' | b'-') = b.get(i) {
+                i += 1;
+            }
+            let magnitude = i;
+            let mut power = 0i64;
+            while let Some(&c @ b'0'..=b'9') = b.get(i) {
+                power = (power * 10 + i64::from(c - b'0')).min(1 << 40);
+                i += 1;
+            }
+            if i == magnitude {
+                return None;
+            }
+            exponent += if negative_exponent { -power } else { power };
+        }
+        let value = if digits <= 19 && mantissa <= 1 << 53 && (-22..=22).contains(&exponent) {
+            let magnitude = mantissa as f64;
+            let magnitude = if exponent >= 0 {
+                magnitude * EXACT_POWERS_OF_TEN[exponent as usize]
+            } else {
+                magnitude / EXACT_POWERS_OF_TEN[(-exponent) as usize]
+            };
+            if negative { -magnitude } else { magnitude }
+        } else {
+            text[start..i].parse::<f64>().ok()?
+        };
+        if !value.is_finite() {
+            return None;
+        }
+        values.push(value);
+        i = space(i);
+        match b.get(i) {
+            Some(b',') => i = space(i + 1),
+            Some(b']') => return (i + 1 == b.len()).then_some(values),
+            _ => return None,
+        }
+    }
+}
+
+/// Decode with fast parameter arrays. On any failure, decode again with the
+/// reference types, so results and error messages are exactly the reference ones.
+fn decode<'a, Fast: Deserialize<'a>, Reference: DeserializeOwned>(
+    text: &'a str,
+    convert: impl FnOnce(Fast) -> Reference,
+) -> Result<Reference, String> {
+    match serde_json::from_str::<Fast>(text) {
+        Ok(fast) => Ok(convert(fast)),
+        Err(_) => serde_json::from_str(text).map_err(|e| e.to_string()),
+    }
+}
+
+fn decode_candidates(text: &str) -> Result<Vec<Candidate>, String> {
+    decode(text, |fast: Vec<FastCandidate>| {
+        fast.into_iter().map(Candidate::from).collect()
+    })
 }
 
 #[derive(Deserialize)]
@@ -182,16 +330,14 @@ impl Prepared {
     }
 
     pub fn evaluate_json(&self, candidates: &str, budget: &str) -> Result<String, String> {
-        let candidates: Vec<Candidate> =
-            serde_json::from_str(candidates).map_err(|e| e.to_string())?;
+        let candidates = decode_candidates(candidates)?;
         let budget = serde_json::from_str(budget).map_err(|e| e.to_string())?;
         self.evaluate_encoded(candidates, budget, true)
     }
 
     /// Evaluate untraced candidates with full feasibility checks and null metrics.
     pub fn scores_json(&self, candidates: &str, budget: &str) -> Result<String, String> {
-        let candidates: Vec<Candidate> =
-            serde_json::from_str(candidates).map_err(|e| e.to_string())?;
+        let candidates = decode_candidates(candidates)?;
         let budget = serde_json::from_str(budget).map_err(|e| e.to_string())?;
         if candidates.iter().any(|c| c.trace) {
             return Err("scores mode accepts untraced candidates only".into());
@@ -517,16 +663,21 @@ fn deadline(budget: &Budget) -> Option<Instant> {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Request {
+struct Request<C> {
     schema: String,
     model: Box<RawValue>,
-    candidates: Vec<Candidate>,
+    candidates: Vec<C>,
     #[serde(default)]
     budget: Budget,
 }
 
 pub fn run(text: &str) -> Result<Value, String> {
-    let req: Request = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let req: Request<Candidate> = decode(text, |fast: Request<FastCandidate>| Request {
+        schema: fast.schema,
+        model: fast.model,
+        candidates: fast.candidates.into_iter().map(Candidate::from).collect(),
+        budget: fast.budget,
+    })?;
     if req.schema != concat!(env!("CARGO_PKG_NAME"), ".request/0.1") {
         return Err("unsupported request schema".into());
     }
@@ -930,6 +1081,154 @@ mod tests {
             out["records"][0]["steps"].as_u64().unwrap()
         );
         assert_eq!(trace.last().unwrap()[0], example["model"]["horizon_s"]);
+    }
+
+    /// The fast decoder must give the reference decoder's values bit for bit,
+    /// or its exact error.
+    fn assert_same_decoding(numbers: &str) {
+        let text = format!(r#"[{{"id":"a","parameters":{numbers}}}]"#);
+        let reference = serde_json::from_str::<Vec<Candidate>>(&text).map_err(|e| e.to_string());
+        let fast = decode_candidates(&text);
+        let bits = |r: &Result<Vec<Candidate>, String>| {
+            r.as_ref()
+                .map(|c| {
+                    c[0].parameters
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>()
+                })
+                .map_err(Clone::clone)
+        };
+        assert_eq!(bits(&fast), bits(&reference), "{numbers}");
+        if let Some(values) = parse_numbers(numbers.trim()) {
+            assert!(
+                serde_json::from_str::<Vec<FastCandidate>>(&text).is_ok(),
+                "{numbers}"
+            );
+            let reference: Vec<f64> = serde_json::from_str(numbers).unwrap();
+            let same = values
+                .iter()
+                .zip(&reference)
+                .all(|(a, b)| a.to_bits() == b.to_bits());
+            assert!(same && values.len() == reference.len(), "{numbers}");
+        }
+    }
+
+    #[test]
+    fn fast_parameter_decoding_matches_serde_json() {
+        for numbers in [
+            "[]",
+            "[ ]",
+            "[0]",
+            "[-0]",
+            "[-0.0]",
+            "[0.0e5]",
+            "[-0e-5]",
+            "[1]",
+            "[1.0]",
+            "[4,2]",
+            " [ 4 , 2 ] ",
+            "[\t1,\n2\r]",
+            "[1e5]",
+            "[1E5]",
+            "[1e+5]",
+            "[1.5e-3]",
+            "[1e22]",
+            "[1e23]",
+            "[1e-22]",
+            "[1e-23]",
+            "[123e20]",
+            "[9007199254740992]",
+            "[9007199254740993]",
+            "[-9007199254740993]",
+            "[9007199254740993e-3]",
+            "[1234567890123456789]",
+            "[12345678901234567890]",
+            "[18446744073709551615]",
+            "[18446744073709551616]",
+            "[-9223372036854775808]",
+            "[-9223372036854775809]",
+            "[123456789012345678901234567890]",
+            "[0.0000000000000000001]",
+            "[0.1000000000000000055511151231257827021181583404541015625]",
+            "[2.2250738585072011e-308]",
+            "[2.2250738585072014e-308]",
+            "[4.9e-324]",
+            "[2.4703282292062327e-324]",
+            "[2.4703282292062328e-324]",
+            "[1e-400]",
+            "[-1e-400]",
+            "[1e400]",
+            "[-1e400]",
+            "[1.7976931348623157e308]",
+            "[1.7976931348623159e308]",
+            "[0e99999999999]",
+            "[1e-99999999999]",
+            "[1e99999999999]",
+            "[0.5e99999999999999999999]",
+            "[01]",
+            "[1.]",
+            "[.5]",
+            "[+1]",
+            "[1e]",
+            "[1e+]",
+            "[-]",
+            "[1,]",
+            "[,1]",
+            "[[1]]",
+            "[\"1\"]",
+            "[null]",
+            "[true]",
+            "1",
+            "{}",
+            "null",
+            "[1 2]",
+            "[NaN]",
+            "[Infinity]",
+            "[-Infinity]",
+            "[0.30000000000000004]",
+            "[5e-324,1.0,-2.5e+10,7E-3,0.1,0.2,0.3]",
+        ] {
+            assert_same_decoding(numbers);
+        }
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..20_000 {
+            let value = f64::from_bits(next());
+            let small = (next() % 2_000_000) as f64 / 64.0 - 15_000.0;
+            let integer = next() >> (next() % 64);
+            let scale = (next() % 45) as i32 - 22;
+            if value.is_finite() {
+                let forms = [
+                    format!("{value}"),
+                    format!("{value:e}"),
+                    format!("{value:.20e}"),
+                    format!("{value:.3e}"),
+                ];
+                assert_same_decoding(&format!("[{}]", forms.join(",")));
+            }
+            assert_same_decoding(&format!(
+                "[{small},{small:e},{integer},-{integer},{integer}.5e-7,{}e{scale},-{}.{}E{scale}]",
+                integer % 1_000_000,
+                integer % 100_000,
+                integer % 1000
+            ));
+        }
+        let request = json!({"schema": "robotics-control-craft.request/0.1",
+            "model": fixture()["model"], "candidates": [{"id": "a", "parameters": [4, 2]}]});
+        let fast = run(&request.to_string()).unwrap();
+        assert_eq!(fast["records"][0]["status"], "complete");
+        let text = request.to_string().replace("[4,2]", "[4,\"2\"]");
+        let error = run(&text).unwrap_err();
+        let reference = serde_json::from_str::<Request<Candidate>>(&text)
+            .err()
+            .unwrap();
+        assert_eq!(error, reference.to_string());
     }
 
     #[test]

@@ -179,3 +179,27 @@ check passes. Otherwise revert it and record it under `rejected/`.
   sixteen run as padded groups.
 - Floating-point results: bit-identical; a unit test compares the
   AVX-512, AVX2 and baseline kernels bit for bit.
+
+### Round 8: exact fast-path decoding of parameter arrays
+
+- Target workload: `invalid` (1,024 full records with 63 parameters
+  each, one worker), round 7 binary before, round 8 binary after, full
+  mode.
+- Profile after round 7 (callgrind): candidate decoding is 69% of
+  `invalid` and 22% of lean `serial`. The rejected round 7 attempt spent
+  about 100 instructions per number in its scanner and about 170 in
+  `str::parse`, roughly serde_json's own cost.
+- Change: as in the rejected attempt, decode `parameters` as a borrowed
+  raw slice with fallback to the reference decoder on any failure, but
+  parse each number in one tight pass: accumulate up to 19 significant
+  digits into an integer `m` and a decimal exponent `e`. When
+  `m <= 2^53` and `|e| <= 22`, both `m` and `10^|e|` are exact doubles,
+  so one IEEE multiply or divide gives the correctly rounded value
+  (Clinger's fast path), the same value serde_json's correctly rounded
+  parser returns. Otherwise use `str::parse::<f64>` on the token, and
+  decline non-finite results.
+- Expected effect: 1.4x to 2x on `invalid`; 1.05x to 1.15x on lean
+  `serial`.
+- Floating-point results: unchanged (identical parsed values); unit
+  tests compare the decoders on edge cases and on random values in
+  several notations.
