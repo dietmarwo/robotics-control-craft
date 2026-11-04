@@ -203,3 +203,22 @@ check passes. Otherwise revert it and record it under `rejected/`.
 - Floating-point results: unchanged (identical parsed values); unit
   tests compare the decoders on edge cases and on random values in
   several notations.
+
+### Round 9: reuse the effort increment while the step repeats
+
+- Target workload: `domain` (48 full records, PD control, 4,000 RK4
+  steps each, one worker), round 8 binary before, round 9 binary after.
+- Profile after round 7: with sixteen AVX-512 lanes the kernel issues
+  eight 512-bit divisions per step (four per eight lanes: position,
+  velocity, tracking error and effort).
+- Change: in the lane kernel, the effort increment `h * w / 6` depends
+  only on the shared step `h` and the per-segment force weight `w`. Keep
+  the increment per lane and recompute it only when `h` differs from the
+  cached step or a new segment starts. The grid step repeats exactly
+  over long stretches, so most steps skip one division per lane. The
+  reused value comes from the same operations, so it is bit-identical.
+- Informal comparison before this declaration (11 alternating matrix
+  samples, not kept as evidence): about 1.12x on `domain` and 1.035x on
+  `domain2`.
+- Expected effect: 1.05x to 1.15x on `domain`.
+- Floating-point results: bit-identical.

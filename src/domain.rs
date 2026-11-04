@@ -255,6 +255,11 @@ fn lanes<const N: usize>(
             force_weight[l] =
                 force_squared + 2.0 * force_squared + 2.0 * force_squared + force_squared;
         }
+        // `h * force_weight / 6` for the step `cached_h`. The weight is fixed for the
+        // segment and lanes share `h`, which repeats exactly over long stretches of the
+        // grid, so the increment is reused; it is the same value the scalar kernel adds.
+        let mut cached_h = f64::NAN;
+        let mut increment = [0.0_f64; N];
         while t < boundary {
             if let Err(failure) = work.step() {
                 for l in 0..N {
@@ -275,6 +280,12 @@ fn lanes<const N: usize>(
                 break 'run;
             }
             let half = 0.5 * h;
+            if h != cached_h {
+                for l in 0..N {
+                    increment[l] = h * force_weight[l] / 6.0;
+                }
+                cached_h = h;
+            }
             let mut failed = false;
             for l in 0..N {
                 let (x0, v0) = (x[l], v[l]);
@@ -292,7 +303,7 @@ fn lanes<const N: usize>(
                 x[l] = x0 + h * (v0 + 2.0 * bv + 2.0 * dv + ev) / 6.0;
                 v[l] = v0 + h * (a1 + 2.0 * b1 + 2.0 * d1 + e1) / 6.0;
                 error[l] += h * (a2 + 2.0 * b2 + 2.0 * d2 + e2) / 6.0;
-                effort[l] += h * force_weight[l] / 6.0;
+                effort[l] += increment[l];
                 max_abs_x[l] = max_abs_x[l].max(x[l].abs());
                 let finite = effort[l].is_finite()
                     & x[l].is_finite()
