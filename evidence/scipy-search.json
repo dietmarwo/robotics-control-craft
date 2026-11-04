@@ -1,9 +1,9 @@
 {
   "mode": "full",
-  "total_seconds": 0.009776812003110535,
-  "prepare_seconds": 6.622900400543585e-05,
-  "search_seconds": 0.009615260001737624,
-  "replay_seconds": 9.532299736747518e-05,
+  "total_seconds": 0.005254888999843388,
+  "prepare_seconds": 0.00014714299959450727,
+  "search_seconds": 0.005002466999940225,
+  "replay_seconds": 0.00010527900030865567,
   "evaluations": 48,
   "failures": 0,
   "best": [
