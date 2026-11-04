@@ -5,6 +5,7 @@ use serde_json::{Value, json, value::RawValue};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
+    ops::Range,
     path::PathBuf,
     sync::{
         OnceLock,
@@ -213,21 +214,37 @@ impl Prepared {
         let budget: Budget = serde_json::from_str(budget).map_err(|e| e.to_string())?;
         check_budget(&budget, rows)?;
         let deadline = deadline(&budget);
-        Ok(self.dispatch(rows, budget.workers, |index| {
-            let row = &parameters[index * dimension..(index + 1) * dimension];
-            let (result, steps) = self.outcome(row, false, &budget, deadline, false);
-            match result {
-                Ok((score, _)) => MatrixScore {
-                    status: "complete",
-                    steps,
-                    score: Some(score),
+        let row = |index: usize| {
+            (
+                &parameters[index * dimension..(index + 1) * dimension],
+                false,
+            )
+        };
+        Ok(self.dispatch(rows, budget.workers, |range, emit| {
+            self.outcomes(
+                range,
+                row,
+                &budget,
+                deadline,
+                false,
+                |index, result, steps| {
+                    emit(
+                        index,
+                        match result {
+                            Ok((score, _)) => MatrixScore {
+                                status: "complete",
+                                steps,
+                                score: Some(score),
+                            },
+                            Err(e) => MatrixScore {
+                                status: e.status,
+                                steps,
+                                score: None,
+                            },
+                        },
+                    )
                 },
-                Err(e) => MatrixScore {
-                    status: e.status,
-                    steps,
-                    score: None,
-                },
-            }
+            )
         }))
     }
 
@@ -258,25 +275,87 @@ impl Prepared {
             monitored: deadline.is_some() || budget.cancel_file.is_some(),
         };
         let result = domain::evaluate(&self.model, parameters, trace, &mut work);
-        let result = result.and_then(|(score, metrics)| {
-            if score.is_finite() {
-                Ok((score, metrics))
-            } else {
-                Err(invalid("nonfinite objective"))
+        (finite_objective(result), work.used)
+    }
+
+    /// Emit the classified outcome of every row in `range`, keyed by row index.
+    ///
+    /// Without a deadline or cancel file, untraced rows whose parameters pass the
+    /// domain check are integrated `domain::LANES` at a time in lockstep. Traced
+    /// rows, monitored budgets and a single leftover row use the scalar kernel.
+    fn outcomes<'p>(
+        &self,
+        range: Range<usize>,
+        row: impl Fn(usize) -> (&'p [f64], bool),
+        budget: &Budget,
+        deadline: Option<Instant>,
+        metrics_enabled: bool,
+        mut emit: impl FnMut(usize, Evaluation, u64),
+    ) {
+        let lockstep = deadline.is_none() && budget.cancel_file.is_none();
+        let mut group = [0usize; domain::LANES];
+        let mut filled = 0;
+        for index in range {
+            let (parameters, trace) = row(index);
+            if !lockstep || trace {
+                let (result, steps) =
+                    self.outcome(parameters, trace, budget, deadline, metrics_enabled);
+                emit(index, result, steps);
+                continue;
             }
-        });
-        (result, work.used)
+            if let Err(failure) = domain::check(&self.model, parameters) {
+                emit(index, Err(failure), 0);
+                continue;
+            }
+            group[filled] = index;
+            filled += 1;
+            if filled == domain::LANES {
+                self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit);
+                filled = 0;
+            }
+        }
+        match filled {
+            0 => {}
+            1 => {
+                let (result, steps) =
+                    self.outcome(row(group[0]).0, false, budget, None, metrics_enabled);
+                emit(group[0], result, steps);
+            }
+            _ => self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit),
+        }
+    }
+
+    /// Integrate the first `filled` rows of `group` in lockstep, padding unused lanes.
+    fn lanes<'p>(
+        &self,
+        group: &[usize; domain::LANES],
+        filled: usize,
+        row: &impl Fn(usize) -> (&'p [f64], bool),
+        budget: &Budget,
+        metrics_enabled: bool,
+        emit: &mut impl FnMut(usize, Evaluation, u64),
+    ) {
+        let parameters = std::array::from_fn(|lane| row(group[lane.min(filled - 1)]).0);
+        let mut work = Work {
+            budget,
+            deadline: None,
+            used: 0,
+            metrics_enabled,
+            monitored: false,
+        };
+        let results = domain::evaluate_lanes(&self.model, parameters, &mut work);
+        for (lane, (result, steps)) in results.into_iter().enumerate().take(filled) {
+            emit(group[lane], finite_objective(result), steps);
+        }
     }
 
     fn record<'a>(
         &self,
         c: &'a Candidate,
-        budget: &Budget,
-        deadline: Option<Instant>,
+        result: Evaluation,
+        steps: u64,
         metrics_enabled: bool,
     ) -> Record<'a> {
-        let (result, steps) =
-            self.outcome(&c.parameters, c.trace, budget, deadline, metrics_enabled);
         match result {
             Ok((score, metrics)) => Record {
                 id: &c.id,
@@ -297,30 +376,37 @@ impl Prepared {
         }
     }
 
-    /// Produce one item per index, inline or on scoped workers, in index order.
+    /// Produce one item per index in index order. `fill` emits the items of an
+    /// index range; it runs inline, or on scoped workers that claim ranges of
+    /// `domain::LANES` indexes.
     fn dispatch<T: Send + Sync>(
         &self,
         count: usize,
         workers: usize,
-        item: impl Fn(usize) -> T + Sync,
+        fill: impl Fn(Range<usize>, &mut dyn FnMut(usize, T)) + Sync,
     ) -> Vec<T> {
         if workers == 1 || count == 1 {
-            return (0..count).map(item).collect();
+            let mut items: Vec<Option<T>> = (0..count).map(|_| None).collect();
+            fill(0..count, &mut |index, item| items[index] = Some(item));
+            return items
+                .into_iter()
+                .map(|item| item.expect("missing evaluation"))
+                .collect();
         }
+        let chunk = domain::LANES;
         let next = AtomicUsize::new(0);
         let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
         std::thread::scope(|scope| {
-            for _ in 0..workers.min(count) {
+            for _ in 0..workers.min(count.div_ceil(chunk)) {
                 scope.spawn(|| {
                     loop {
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        if index >= count {
+                        let start = next.fetch_add(chunk, Ordering::Relaxed);
+                        if start >= count {
                             break;
                         }
-                        assert!(
-                            slots[index].set(item(index)).is_ok(),
-                            "duplicate work index"
-                        );
+                        fill(start..(start + chunk).min(count), &mut |index, item| {
+                            assert!(slots[index].set(item).is_ok(), "duplicate work index");
+                        });
                     }
                 });
             }
@@ -351,8 +437,24 @@ impl Prepared {
             return Err("at most 16 traced candidates per batch".into());
         }
         let deadline = deadline(&budget);
-        let records = self.dispatch(candidates.len(), budget.workers, |index| {
-            self.record(&candidates[index], &budget, deadline, metrics_enabled)
+        let row = |index: usize| {
+            let c = &candidates[index];
+            (c.parameters.as_slice(), c.trace)
+        };
+        let records = self.dispatch(candidates.len(), budget.workers, |range, emit| {
+            self.outcomes(
+                range,
+                row,
+                &budget,
+                deadline,
+                metrics_enabled,
+                |index, result, steps| {
+                    emit(
+                        index,
+                        self.record(&candidates[index], result, steps, metrics_enabled),
+                    )
+                },
+            )
         });
         Ok(Batch {
             model_sha256: &self.model_sha256,
@@ -361,6 +463,17 @@ impl Prepared {
             version: env!("CARGO_PKG_VERSION"),
         })
     }
+}
+
+/// Classify a nonfinite objective as an invalid candidate.
+fn finite_objective(result: Evaluation) -> Evaluation {
+    result.and_then(|(score, metrics)| {
+        if score.is_finite() {
+            Ok((score, metrics))
+        } else {
+            Err(invalid("nonfinite objective"))
+        }
+    })
 }
 
 fn check_budget(budget: &Budget, count: usize) -> Result<(), String> {
@@ -613,6 +726,98 @@ mod tests {
             .map(|row| row.status)
             .collect();
         assert_eq!(statuses, ["complete", "infeasible", "invalid", "complete"]);
+    }
+
+    /// Full records from lockstep lanes must equal the scalar kernel byte for byte.
+    /// A `wall_ms` budget is monitored, which forces the scalar kernel.
+    fn assert_lanes_match_scalar(prepared: &Prepared, rows: &[Value], budget: Value) {
+        let mut statuses = HashSet::new();
+        for count in 1..=rows.len() {
+            let candidates: Vec<Value> = rows[..count]
+                .iter()
+                .enumerate()
+                .map(|(i, p)| json!({"id": format!("c{i}"), "parameters": p}))
+                .collect();
+            let candidates = Value::from(candidates).to_string();
+            let mut scalar = budget.clone();
+            scalar["wall_ms"] = json!(3_600_000);
+            for workers in [1, 3] {
+                let mut lockstep = budget.clone();
+                lockstep["workers"] = json!(workers);
+                scalar["workers"] = json!(workers);
+                let lanes = prepared
+                    .evaluate_json(&candidates, &lockstep.to_string())
+                    .unwrap();
+                let reference = prepared
+                    .evaluate_json(&candidates, &scalar.to_string())
+                    .unwrap();
+                assert_eq!(lanes, reference, "{count} rows, {lockstep}");
+                let lanes: Value = serde_json::from_str(&lanes).unwrap();
+                for row in lanes["records"].as_array().unwrap() {
+                    statuses.insert(row["status"].as_str().unwrap().to_owned());
+                }
+            }
+        }
+        assert!(statuses.len() >= 2, "{budget}: {statuses:?}");
+    }
+
+    #[test]
+    fn lockstep_lanes_match_scalar_kernel() {
+        let example = fixture();
+        let mut model = example["model"].clone();
+        model["target_m"] = json!(1.8);
+        model["initial_x_m"] = json!(0.0);
+        let pd = Prepared::new(&model.to_string()).unwrap();
+        let rows = [
+            json!([4.0, 2.0]),
+            json!([40.0, 0.0]),
+            json!([-1.0, 0.0]),
+            json!([2.0, 1.0]),
+            json!([9.0, 0.5]),
+            json!([0.0, 0.0]),
+            json!([1e6, 0.0]),
+            json!([6.0, 3.0]),
+            json!([25.0, 0.1]),
+        ];
+        assert_lanes_match_scalar(&pd, &rows, json!({}));
+        assert_lanes_match_scalar(&pd, &rows, json!({"max_steps": 30}));
+        assert_lanes_match_scalar(&pd, &rows, json!({"max_steps": 55}));
+        let mut held = example["model"].clone();
+        held["control"] = json!({"kind": "held", "switches_s": [0.4, 1.1]});
+        let held = Prepared::new(&held.to_string()).unwrap();
+        let rows = [
+            json!([-1.0, -0.5, 0.0]),
+            json!([3.0, 3.0, 3.0]),
+            json!([5.0, 0.0, 0.0]),
+            json!([0.5, 0.25, -0.25]),
+            json!([2.5, 2.9, 0.0]),
+            json!([-3.0, 3.0, -3.0]),
+            json!([0.0, 0.0]),
+        ];
+        assert_lanes_match_scalar(&held, &rows, json!({}));
+        assert_lanes_match_scalar(&held, &rows, json!({"max_steps": 20}));
+        assert_lanes_match_scalar(&held, &rows, json!({"max_steps": 45}));
+        let lanes: Value = serde_json::from_str(
+            &held
+                .evaluate_json(
+                    &json!([{"id":"a","parameters":rows[0]},{"id":"b","parameters":rows[1]},
+                             {"id":"c","parameters":rows[3]},{"id":"d","parameters":rows[4]}])
+                    .to_string(),
+                    "{}",
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let statuses: Vec<_> = lanes["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["status"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            statuses,
+            ["complete", "infeasible", "complete", "infeasible"]
+        );
     }
 
     #[test]

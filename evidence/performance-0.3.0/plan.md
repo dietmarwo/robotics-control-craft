@@ -35,3 +35,21 @@ check passes. Otherwise revert it and record it under `rejected/`.
 - Expected effect: removes candidate decoding and record encoding, which
   are about 40% of lean `serial` instructions; expect about 1.4x to 1.7x.
 - Floating-point results: unchanged (same kernel).
+
+### Round 2: lockstep RK4 lanes for untraced candidates
+
+- Target workload: `domain` (48 full records, 4,000 RK4 steps each, one
+  worker), round 1 binary before, round 2 binary after, both full mode.
+- Change: when a budget has no deadline and no cancel file, the engine
+  groups consecutive untraced candidates with valid parameters into
+  groups of four. The domain integrates each group in lockstep on the
+  shared control and time grid with one shared step counter. Each lane
+  performs the same floating-point operations in the same order as the
+  scalar kernel, so results are bit-identical. A lane that fails is
+  recorded with its own step count and masked. Traced or monitored
+  candidates and a single leftover candidate use the scalar kernel.
+- Expected effect: the scalar step is latency-bound on one dependency
+  chain; four independent chains should give about 1.8x to 3x on
+  `domain`.
+- Floating-point results: bit-identical by construction (same operation
+  order per lane, no fused operations).
