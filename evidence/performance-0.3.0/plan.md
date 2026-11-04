@@ -53,3 +53,29 @@ check passes. Otherwise revert it and record it under `rejected/`.
   `domain`.
 - Floating-point results: bit-identical by construction (same operation
   order per lane, no fused operations).
+
+### Round 3: AVX2 build of the lockstep lane kernel
+
+- Target workload: `domain2` (48 full records, held actuation with four
+  switches, 4,000 RK4 steps each, one worker), round 2 binary before,
+  round 3 binary after.
+- Profile after round 2: the lane kernel is vectorized two-wide with
+  SSE2. Twelve percent fewer instructions (cheaper failure screening)
+  and eight lanes both left the time unchanged, which points at the FP
+  execution ports rather than instruction count or latency.
+- Change: compile the same lane kernel body a second time with
+  `#[target_feature(enable = "avx2")]` and select it at preparation with
+  `is_x86_feature_detected!("avx2")`. AVX2 does not enable FMA, and Rust
+  does not contract multiplies and adds, so each lane performs the same
+  IEEE operations. Hosts without AVX2 keep the SSE2 kernel.
+- Expected effect: about half the FP micro-ops per lane-step; expect
+  1.3x to 1.8x on `domain2`, limited by the divider (four divisions per
+  lane-step).
+- Floating-point results: bit-identical (same operations and order).
+- Amendment before the formal timing: informal matrix-mode pair runs
+  (not kept as evidence) gave 1.15x for AVX2 with four lanes, 2.0x for
+  AVX2 with eight lanes and 1.9x with twelve. With AVX2, four lanes no
+  longer cover the step's dependency chain (about 87 cycles of
+  multiply, add and divide latency). The round therefore also widens
+  `domain::LANES` from four to eight, for both builds. The target
+  workload and the decision rule are unchanged.

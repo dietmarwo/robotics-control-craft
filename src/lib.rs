@@ -728,8 +728,10 @@ mod tests {
         assert_eq!(statuses, ["complete", "infeasible", "invalid", "complete"]);
     }
 
-    /// Full records from lockstep lanes must equal the scalar kernel byte for byte.
-    /// A `wall_ms` budget is monitored, which forces the scalar kernel.
+    /// Full records from lockstep lanes must equal the scalar kernel byte for byte
+    /// for every batch size from one row up to `rows.len()`, which covers full,
+    /// padded and single leftover groups. A `wall_ms` budget is monitored, which
+    /// forces the scalar kernel.
     fn assert_lanes_match_scalar(prepared: &Prepared, rows: &[Value], budget: Value) {
         let mut statuses = HashSet::new();
         for count in 1..=rows.len() {
@@ -778,6 +780,8 @@ mod tests {
             json!([1e6, 0.0]),
             json!([6.0, 3.0]),
             json!([25.0, 0.1]),
+            json!([12.0, 0.2]),
+            json!([3.0, 0.0]),
         ];
         assert_lanes_match_scalar(&pd, &rows, json!({}));
         assert_lanes_match_scalar(&pd, &rows, json!({"max_steps": 30}));
@@ -793,6 +797,10 @@ mod tests {
             json!([2.5, 2.9, 0.0]),
             json!([-3.0, 3.0, -3.0]),
             json!([0.0, 0.0]),
+            json!([1.0, 2.0, 2.5]),
+            json!([-0.5, 0.5, 2.0]),
+            json!([2.9, 2.9, 2.9]),
+            json!([0.1, 0.2, 0.3]),
         ];
         assert_lanes_match_scalar(&held, &rows, json!({}));
         assert_lanes_match_scalar(&held, &rows, json!({"max_steps": 20}));

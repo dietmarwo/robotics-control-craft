@@ -24,6 +24,9 @@ pub struct Model {
     force_limit_n: f64,
     position_limit_m: f64,
     control: Control,
+    /// The host supports AVX2, detected once at preparation.
+    #[serde(skip)]
+    avx2: bool,
 }
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -68,11 +71,15 @@ pub fn prepare(mut model: Model) -> Result<Model, String> {
         _ => {}
     }
     model.inverse_mass = 1.0 / model.mass_kg;
+    #[cfg(target_arch = "x86_64")]
+    {
+        model.avx2 = std::arch::is_x86_feature_detected!("avx2");
+    }
     Ok(model)
 }
 
 /// Number of untraced candidates that `evaluate_lanes` integrates in lockstep.
-pub const LANES: usize = 4;
+pub const LANES: usize = 8;
 
 pub fn evaluate(m: &Model, parameters: &[f64], trace: bool, work: &mut Work<'_>) -> Evaluation {
     check(m, parameters)?;
@@ -113,6 +120,32 @@ pub fn check(m: &Model, parameters: &[f64]) -> Result<(), Failure> {
 /// that fails keeps the step count reached at that point. `work` must be
 /// unmonitored and unused.
 pub fn evaluate_lanes(
+    m: &Model,
+    parameters: [&[f64]; LANES],
+    work: &mut Work<'_>,
+) -> [(Evaluation, u64); LANES] {
+    #[cfg(target_arch = "x86_64")]
+    if m.avx2 {
+        // SAFETY: `prepare` detected AVX2 support on this host.
+        return unsafe { lanes_avx2(m, parameters, work) };
+    }
+    lanes(m, parameters, work)
+}
+
+/// The lane kernel compiled for AVX2. AVX2 does not enable fused multiply-add,
+/// and Rust does not contract operations, so results equal the baseline build.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn lanes_avx2(
+    m: &Model,
+    parameters: [&[f64]; LANES],
+    work: &mut Work<'_>,
+) -> [(Evaluation, u64); LANES] {
+    lanes(m, parameters, work)
+}
+
+#[inline(always)]
+fn lanes(
     m: &Model,
     parameters: [&[f64]; LANES],
     work: &mut Work<'_>,
@@ -321,4 +354,76 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
         "trace_columns":["t_s","x_m","v_m_s","held_force_n"],"trace":TRACE.then_some(trace)})
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Budget;
+
+    #[test]
+    fn avx2_lanes_equal_baseline_lanes() {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            let budget = Budget::default();
+            let fresh = || Work {
+                budget: &budget,
+                deadline: None,
+                used: 0,
+                monitored: false,
+                metrics_enabled: true,
+            };
+            let base = r#"{"mass_kg":1,"spring_n_per_m":1,"damping_ns_per_m":0.4,
+                "initial_x_m":0,"initial_v_m_s":0.2,"target_m":1.8,"dt_s":0.01,
+                "horizon_s":3,"force_limit_n":3,"position_limit_m":2,"control":"#;
+            let pd = prepare(
+                serde_json::from_str(&format!(r#"{base}{{"kind":"pd","interval_s":0.1}}}}"#))
+                    .unwrap(),
+            )
+            .unwrap();
+            let held = prepare(
+                serde_json::from_str(&format!(
+                    r#"{base}{{"kind":"held","switches_s":[0.4,1.1]}}}}"#
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let gains: Vec<[f64; 2]> = (0..LANES)
+                .map(|l| [0.5 + 2.5 * l as f64, 1.5 - 0.15 * l as f64])
+                .collect();
+            let forces: Vec<[f64; 3]> = (0..LANES)
+                .map(|l| {
+                    [
+                        3.0 - 0.7 * l as f64,
+                        0.4 * l as f64 - 1.0,
+                        1.0 + 0.2 * l as f64,
+                    ]
+                })
+                .collect();
+            for (model, rows) in [
+                (&pd, gains.iter().map(|g| &g[..]).collect::<Vec<_>>()),
+                (&held, forces.iter().map(|f| &f[..]).collect()),
+            ] {
+                let parameters: [&[f64]; LANES] = std::array::from_fn(|l| rows[l]);
+                let (mut a, mut b) = (fresh(), fresh());
+                let baseline = lanes(model, parameters, &mut a);
+                // SAFETY: AVX2 support was detected above.
+                let avx2 = unsafe { lanes_avx2(model, parameters, &mut b) };
+                let text = |r: &[(Evaluation, u64); LANES]| {
+                    r.iter()
+                        .map(|(e, s)| match e {
+                            Ok((score, metrics)) => format!("{s} {:x} {metrics}", score.to_bits()),
+                            Err(f) => format!("{s} {} {}", f.status, f.detail),
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(text(&baseline), text(&avx2));
+                let statuses: Vec<_> = baseline
+                    .iter()
+                    .map(|(e, _)| e.as_ref().map_or_else(|f| f.status, |_| "complete"))
+                    .collect();
+                assert!(statuses.contains(&"complete") && statuses.contains(&"infeasible"));
+            }
+        }
+    }
 }
