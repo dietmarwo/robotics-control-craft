@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod breakdown;
 mod domain;
 
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};

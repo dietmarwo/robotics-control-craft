@@ -132,6 +132,20 @@ const LANES: usize = 8;
 /// Lockstep width of the AVX-512 lane kernel, the largest width.
 pub const MAX_LANES: usize = 16;
 
+impl Model {
+    /// Name of the lane kernel selected for this host.
+    #[cfg(test)]
+    pub fn kernel_name(&self) -> &'static str {
+        if self.avx512 {
+            "avx512f, 16 lanes"
+        } else if self.avx2 {
+            "avx2, 8 lanes"
+        } else {
+            "baseline, 8 lanes"
+        }
+    }
+}
+
 /// Number of untraced candidates `evaluate_lanes` integrates together on this host.
 pub fn lane_width(m: &Model) -> usize {
     if m.avx512 { MAX_LANES } else { LANES }
