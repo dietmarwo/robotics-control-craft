@@ -112,3 +112,19 @@ check passes. Otherwise revert it and record it under `rejected/`.
 - Expected effect: 1.3x to 1.6x on `trace` (float formatting remains).
 - Floating-point results: unchanged; the same `f64` values go through
   the same formatter.
+
+### Round 6: the calling thread works as one of the batch workers
+
+- Target workload: `parallel` (96 full records, 62 steps each, four
+  workers on this 2-vCPU host), round 5 binary before, round 6 binary
+  after, full mode.
+- Profile after round 5: `parallel` takes about 0.25 ms versus about
+  0.11 ms for `serial` with the same candidates, so thread creation and
+  joining dominate. The calling thread only waits inside the scope.
+- Change: spawn `workers - 1` scoped threads (bounded by the number of
+  index ranges) and run the same claim loop on the calling thread.
+  Records are written to the same per-index slots, so output order and
+  content do not depend on which thread evaluates a range.
+- Expected effect: one fewer thread spawn and join per batch; expect
+  1.15x to 1.3x on `parallel`.
+- Floating-point results: unchanged.

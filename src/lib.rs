@@ -389,8 +389,8 @@ impl Prepared {
     }
 
     /// Produce one item per index in index order. `fill` emits the items of an
-    /// index range; it runs inline, or on scoped workers that claim ranges of
-    /// `domain::LANES` indexes.
+    /// index range; it runs inline, or on the calling thread plus scoped workers
+    /// that claim ranges of `domain::LANES` indexes.
     fn dispatch<T: Send + Sync>(
         &self,
         count: usize,
@@ -408,20 +408,23 @@ impl Prepared {
         let chunk = domain::LANES;
         let next = AtomicUsize::new(0);
         let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
-        std::thread::scope(|scope| {
-            for _ in 0..workers.min(count.div_ceil(chunk)) {
-                scope.spawn(|| {
-                    loop {
-                        let start = next.fetch_add(chunk, Ordering::Relaxed);
-                        if start >= count {
-                            break;
-                        }
-                        fill(start..(start + chunk).min(count), &mut |index, item| {
-                            assert!(slots[index].set(item).is_ok(), "duplicate work index");
-                        });
-                    }
+        let claim = || {
+            loop {
+                let start = next.fetch_add(chunk, Ordering::Relaxed);
+                if start >= count {
+                    break;
+                }
+                fill(start..(start + chunk).min(count), &mut |index, item| {
+                    assert!(slots[index].set(item).is_ok(), "duplicate work index");
                 });
             }
+        };
+        // The calling thread is one of the workers.
+        std::thread::scope(|scope| {
+            for _ in 1..workers.min(count.div_ceil(chunk)) {
+                scope.spawn(claim);
+            }
+            claim();
         });
         slots
             .into_iter()
