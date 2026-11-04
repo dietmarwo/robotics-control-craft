@@ -1,0 +1,65 @@
+{
+  "method": "SHA-256 of each benchmark binary's probe output (full and lean records, version string included) for every saved round binary",
+  "workloads": [
+    "one",
+    "serial",
+    "parallel",
+    "trace",
+    "invalid",
+    "domain",
+    "domain2"
+  ],
+  "pairs": [
+    {
+      "before": "round00",
+      "after": "round01",
+      "byte_identical": true
+    },
+    {
+      "before": "round01",
+      "after": "round02",
+      "byte_identical": true
+    },
+    {
+      "before": "round02",
+      "after": "round03",
+      "byte_identical": true
+    },
+    {
+      "before": "round03",
+      "after": "round04",
+      "byte_identical": true
+    },
+    {
+      "before": "round04",
+      "after": "round05",
+      "byte_identical": true
+    },
+    {
+      "before": "round05",
+      "after": "round06",
+      "byte_identical": true
+    },
+    {
+      "before": "round06",
+      "after": "round07",
+      "byte_identical": true
+    },
+    {
+      "before": "round07",
+      "after": "round08",
+      "byte_identical": true
+    },
+    {
+      "before": "round08",
+      "after": "round09",
+      "byte_identical": true
+    },
+    {
+      "before": "round09",
+      "after": "round10",
+      "byte_identical": true
+    }
+  ],
+  "round00_to_round10_identical": true
+}

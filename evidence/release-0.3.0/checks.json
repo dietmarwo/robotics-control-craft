@@ -47,5 +47,31 @@
       2.6972219501353756
     ],
     "score": 0.24281542939165648
-  }
+  },
+  "cargo_package": "cargo package --locked packaged 39 files and verified the crate by building it (committed release tree, commit 7bd41e7)",
+  "final_packages": {
+    "robotics-control-craft-0.3.0.crate": "ac8f46679f60b64a1d325e04c8e46c1235036289467dbc32499fff7e9aeafdba",
+    "robotics_control_craft-0.3.0.tar.gz": "34c0591346d245fe8134c5b69829764ed1f6c94a4c61fa2fbdd70112ebc19c50",
+    "robotics_control_craft-0.3.0-cp310-abi3-manylinux_2_34_x86_64.whl": "9abdf3f4541f6e2e1e3d09b60128b5091eb6acfa1832ef5213e0f74a2c6b191c"
+  },
+  "final_wheel_checks": {
+    "installed_py": {
+      "installed": true,
+      "ordered_replay": true,
+      "resumed_results": 12,
+      "retained_attempts": 21,
+      "introductory_score": 0.26183385953817806,
+      "batch_candidates": 96
+    },
+    "release_checks_py": {
+      "status": "passed",
+      "tutorial_python_blocks": 5,
+      "lean_api_and_budget_parity": true,
+      "matrix_api_parity": true,
+      "manual_python_blocks": 26
+    },
+    "campaign": "two manifest runs identical (cmp)",
+    "venv": "fresh CPython 3.12.3 venv with the final wheel built from the extracted final sdist"
+  },
+  "pass_note": "sdist, wheel and installed checks ran twice: pass 1 produced the top-level evidence files that the final sdist carries; pass 2 rebuilt the packages from the committed release tree and re-checked the final wheel"
 }

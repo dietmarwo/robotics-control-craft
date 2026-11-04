@@ -1,0 +1,145 @@
+From 1e07a688a3bf91eb3f0146d60585fe554e0a497e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 11:54:19 -0400
+Subject: [PATCH 06/13] Round 6: Run one batch worker on the calling thread
+
+Spawn one scoped thread fewer than the requested worker count (bounded
+by the number of index ranges) and run the same range-claiming loop on
+the calling thread, which previously only waited for the scope. Items
+still go to per-index slots, so record order and content do not depend
+on the thread that evaluated them.
+
+Workload: parallel (96 full records, 62 steps each, four workers on a
+2-vCPU host).
+Before median: 0.2775 ms. After median: 0.2169 ms. Speedup: 1.28x.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/plan.md            | 16 ++++++++
+ .../performance-0.3.0/round06-parallel.json   | 38 +++++++++++++++++++
+ src/lib.rs                                    | 31 ++++++++-------
+ 3 files changed, 71 insertions(+), 14 deletions(-)
+ create mode 100644 evidence/performance-0.3.0/round06-parallel.json
+
+diff --git a/evidence/performance-0.3.0/plan.md b/evidence/performance-0.3.0/plan.md
+index dc95e6a..65d33c8 100644
+--- a/evidence/performance-0.3.0/plan.md
++++ b/evidence/performance-0.3.0/plan.md
+@@ -112,3 +112,19 @@ check passes. Otherwise revert it and record it under `rejected/`.
+ - Expected effect: 1.3x to 1.6x on `trace` (float formatting remains).
+ - Floating-point results: unchanged; the same `f64` values go through
+   the same formatter.
++
++### Round 6: the calling thread works as one of the batch workers
++
++- Target workload: `parallel` (96 full records, 62 steps each, four
++  workers on this 2-vCPU host), round 5 binary before, round 6 binary
++  after, full mode.
++- Profile after round 5: `parallel` takes about 0.25 ms versus about
++  0.11 ms for `serial` with the same candidates, so thread creation and
++  joining dominate. The calling thread only waits inside the scope.
++- Change: spawn `workers - 1` scoped threads (bounded by the number of
++  index ranges) and run the same claim loop on the calling thread.
++  Records are written to the same per-index slots, so output order and
++  content do not depend on which thread evaluates a range.
++- Expected effect: one fewer thread spawn and join per batch; expect
++  1.15x to 1.3x on `parallel`.
++- Floating-point results: unchanged.
+diff --git a/evidence/performance-0.3.0/round06-parallel.json b/evidence/performance-0.3.0/round06-parallel.json
+new file mode 100644
+index 0000000..894e723
+--- /dev/null
++++ b/evidence/performance-0.3.0/round06-parallel.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "parallel",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.000295946,
++    0.000323162,
++    0.000548821,
++    0.000277548,
++    0.00028017925,
++    0.0002302275,
++    0.00026879575,
++    0.00024312275,
++    0.0002717465,
++    0.00028352625,
++    0.00026823375
++  ],
++  "after_seconds": [
++    0.00019653025,
++    0.0005493175,
++    0.00024106125,
++    0.00025216125,
++    0.00019416575,
++    0.0001911495,
++    0.00026905175,
++    0.0001877615,
++    0.00021036475,
++    0.0002168655,
++    0.00025655275
++  ],
++  "medians_seconds": [
++    0.000277548,
++    0.0002168655
++  ],
++  "speedup": 1.2798162916646494
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index 82e71f5..5b0f8c1 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -389,8 +389,8 @@ impl Prepared {
+     }
+ 
+     /// Produce one item per index in index order. `fill` emits the items of an
+-    /// index range; it runs inline, or on scoped workers that claim ranges of
+-    /// `domain::LANES` indexes.
++    /// index range; it runs inline, or on the calling thread plus scoped workers
++    /// that claim ranges of `domain::LANES` indexes.
+     fn dispatch<T: Send + Sync>(
+         &self,
+         count: usize,
+@@ -408,20 +408,23 @@ impl Prepared {
+         let chunk = domain::LANES;
+         let next = AtomicUsize::new(0);
+         let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
+-        std::thread::scope(|scope| {
+-            for _ in 0..workers.min(count.div_ceil(chunk)) {
+-                scope.spawn(|| {
+-                    loop {
+-                        let start = next.fetch_add(chunk, Ordering::Relaxed);
+-                        if start >= count {
+-                            break;
+-                        }
+-                        fill(start..(start + chunk).min(count), &mut |index, item| {
+-                            assert!(slots[index].set(item).is_ok(), "duplicate work index");
+-                        });
+-                    }
++        let claim = || {
++            loop {
++                let start = next.fetch_add(chunk, Ordering::Relaxed);
++                if start >= count {
++                    break;
++                }
++                fill(start..(start + chunk).min(count), &mut |index, item| {
++                    assert!(slots[index].set(item).is_ok(), "duplicate work index");
+                 });
+             }
++        };
++        // The calling thread is one of the workers.
++        std::thread::scope(|scope| {
++            for _ in 1..workers.min(count.div_ceil(chunk)) {
++                scope.spawn(claim);
++            }
++            claim();
+         });
+         slots
+             .into_iter()
+-- 
+2.43.0
+

@@ -1,0 +1,4534 @@
+From 28c6fcea8c0c34515e6df48f2aa59f3fcba85ef9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 12:40:33 -0400
+Subject: [PATCH 12/13] Document 0.3.0 and add application and optimization
+ examples
+
+Bump the version to 0.3.0. Add docs/user-manual.md with a complete model,
+request and result reference, statuses, budgets, the Python, Rust and
+command-line APIs, provenance, performance tips and troubleshooting;
+its 26 Python blocks run in validation/release_checks.py, which now also
+checks matrix parity. Update the architecture guide for 0.3.0 with
+measured performance, and the README and tutorial for score_matrix.
+Add four application and three optimization examples (SciPy, fcmaes
+CMA-ES ask/tell with populations through score_matrix, fcmaes BiteOpt
+with failure penalties) with recorded outputs, and a Rust score_matrix
+example. Limit the crate file list to sources, docs, models, validation
+scripts and release evidence.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Cargo.lock                                    |    2 +-
+ Cargo.toml                                    |   23 +-
+ README.md                                     |   32 +-
+ docs/architecture.md                          |  455 +++++--
+ docs/model.md                                 |    2 +-
+ docs/tutorial.md                              |   61 +-
+ docs/user-manual.md                           | 1086 +++++++++++++++++
+ evidence/performance-0.3.0/breakdown.json     |  963 ++++++++++++---
+ .../performance-0.3.0/monitored-budget.json   |   53 +
+ .../performance-0.3.0/python-call-cost.json   |  220 ++++
+ .../python-optimization.json                  |  508 ++++++++
+ examples/matrix.rs                            |   40 +
+ examples/python/README.md                     |   32 +
+ examples/python/fcmaes_bite_robust_pd.py      |   81 ++
+ examples/python/fcmaes_cmaes_held_schedule.py |   69 ++
+ .../python/held_actuation_and_convergence.py  |   72 ++
+ .../python/outputs/fcmaes_bite_robust_pd.txt  |    7 +
+ .../outputs/fcmaes_cmaes_held_schedule.txt    |   11 +
+ .../held_actuation_and_convergence.txt        |   22 +
+ .../python/outputs/parameter_sensitivity.txt  |   13 +
+ examples/python/outputs/pd_gain_study.txt     |   28 +
+ examples/python/outputs/rust_matrix.txt       |    2 +
+ .../python/outputs/scenario_robustness.txt    |   22 +
+ examples/python/outputs/scipy_de_tuning.txt   |    7 +
+ examples/python/parameter_sensitivity.py      |   53 +
+ examples/python/pd_gain_study.py              |   68 ++
+ examples/python/scenario_robustness.py        |   64 +
+ examples/python/scipy_de_tuning.py            |   71 ++
+ pyproject.toml                                |    2 +-
+ validation/release_checks.py                  |   39 +-
+ 30 files changed, 3815 insertions(+), 293 deletions(-)
+ create mode 100644 docs/user-manual.md
+ create mode 100644 evidence/performance-0.3.0/monitored-budget.json
+ create mode 100644 evidence/performance-0.3.0/python-call-cost.json
+ create mode 100644 evidence/performance-0.3.0/python-optimization.json
+ create mode 100644 examples/matrix.rs
+ create mode 100644 examples/python/README.md
+ create mode 100644 examples/python/fcmaes_bite_robust_pd.py
+ create mode 100644 examples/python/fcmaes_cmaes_held_schedule.py
+ create mode 100644 examples/python/held_actuation_and_convergence.py
+ create mode 100644 examples/python/outputs/fcmaes_bite_robust_pd.txt
+ create mode 100644 examples/python/outputs/fcmaes_cmaes_held_schedule.txt
+ create mode 100644 examples/python/outputs/held_actuation_and_convergence.txt
+ create mode 100644 examples/python/outputs/parameter_sensitivity.txt
+ create mode 100644 examples/python/outputs/pd_gain_study.txt
+ create mode 100644 examples/python/outputs/rust_matrix.txt
+ create mode 100644 examples/python/outputs/scenario_robustness.txt
+ create mode 100644 examples/python/outputs/scipy_de_tuning.txt
+ create mode 100644 examples/python/parameter_sensitivity.py
+ create mode 100644 examples/python/pd_gain_study.py
+ create mode 100644 examples/python/scenario_robustness.py
+ create mode 100644 examples/python/scipy_de_tuning.py
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 6cfb47b..84b8842 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -169,7 +169,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "robotics-control-craft"
+-version = "0.2.0"
++version = "0.3.0"
+ dependencies = [
+  "pyo3",
+  "serde",
+diff --git a/Cargo.toml b/Cargo.toml
+index f27d0cc..db4ea18 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,10 +1,31 @@
+ [package]
+ name = "robotics-control-craft"
+-version = "0.2.0"
++version = "0.3.0"
+ edition = "2024"
+ rust-version = "1.88"
+ description = "Bounded robotics-control-craft research evaluator"
+ license = "MIT"
++# Package sources, docs, models, validation scripts and the release evidence
++# that the source distribution has always carried; not the build artifacts,
++# patch series or performance evidence of the release ZIP.
++include = [
++    "/.gitignore",
++    "/Cargo.lock",
++    "/LICENSE",
++    "/README.md",
++    "/pyproject.toml",
++    "/src/**/*.rs",
++    "/examples/*.rs",
++    "/models/*.json",
++    "/python/**/*.py",
++    "/python/**/*.json",
++    "/docs/*.md",
++    "/validation/*.py",
++    "/evidence/installed.json",
++    "/evidence/native-sweep.json",
++    "/evidence/scipy-search.json",
++    "/evidence/validation.json",
++]
+ 
+ [lib]
+ crate-type = ["rlib", "cdylib"]
+diff --git a/README.md b/README.md
+index 1703416..04452af 100644
+--- a/README.md
++++ b/README.md
+@@ -1,17 +1,22 @@
+-# robotics-control-craft 0.2.0
++# robotics-control-craft 0.3.0
+ 
+ A bounded research evaluator. See the [model card](docs/model.md) for units,
+-equations and supported behavior. The accompanying implementation log
+-records which milestones ran and which use a bounded fallback.
+-See the [tutorial](docs/tutorial.md) and [architecture](docs/architecture.md).
+-The [0.1.0 implementation record](docs/implementation-0.1.0.md) preserves the original scope.
++equations and supported behavior and the [user manual](docs/user-manual.md)
++for the complete model and API reference with runnable examples. The
++[tutorial](docs/tutorial.md) is a short walk-through, the
++[architecture guide](docs/architecture.md) describes data flow and measured
++performance, and [`examples/python/`](examples/python/README.md) contains
++application and optimization scripts with recorded outputs. The
++[0.1.0 implementation record](docs/implementation-0.1.0.md) preserves the
++original scope; the performance logs record the 0.2.0 and 0.3.0 changes.
+ 
+-## Rust CLI and native example
++## Rust CLI and native examples
+ 
+ ```sh
+ cargo run --release --locked -- describe
+ cargo run --release --locked -- run models/request.json
+ cargo run --release --locked --example sweep -- models/example.json
++cargo run --release --locked --example matrix -- models/example.json
+ ```
+ 
+ The CLI uses versioned JSON with exact model-byte SHA-256, candidate IDs and
+@@ -33,10 +38,15 @@ prepared = Prepared(case["model"])
+ row = prepared.evaluate(case["parameters"], trace=True)
+ assert row["status"] == "complete"
+ print(row["score"])
++scores, statuses, steps = prepared.score_matrix([[4, 2], [16, 5.5]])
++print(scores, statuses, steps)
+ ```
+ 
+-`Prepared.batch` crosses into native code once per batch. A set of scoped
+-workers evaluates candidates in isolation and returns records in input order.
++`Prepared.batch` and `Prepared.scores` cross into native code once per
++batch with JSON candidates and records. `Prepared.score_matrix` takes a
++numeric matrix and returns scores, statuses and steps without JSON, which
++suits optimizers. Untraced candidates are integrated in lockstep vector
++lanes; results are identical for every API, worker count and kernel.
+ The local Python campaign commits results to SQLite, preserves interrupted
+ attempts and reuses completed records by candidate, scenario, settings and
+ build identity. Fixed-work replay is scoped to the tested build.
+@@ -53,7 +63,7 @@ maturin sdist --out dist
+ maturin build --release --locked --out dist
+ ```
+ 
+-Independent numerical scripts use Python 3.12. The oscillator and population
+-oracles use NumPy 2.3.5 and SciPy 1.17.0. The optional
++Independent numerical scripts use Python 3.12. The oscillator oracle uses
++NumPy 2.3.5 and SciPy 1.17.0. The optional
+ `validation/optimize.py robotics_control_craft` demonstrates an in-process SciPy DE objective.
+-The native sweep needs only the Rust crate. See `evidence/` for actual runs.
++The native examples need only the Rust crate. See `evidence/` for actual runs.
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 6ed7b8e..18fcb25 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,106 +1,407 @@
+ # Robotics Control Craft architecture
+ 
+-Version 0.2.0. Optimize sampled control and held actuation for a bounded mass–spring–damper oscillator.
++Version 0.3.0. Optimize sampled control and held actuation for a bounded
++mass–spring–damper oscillator. The [user manual](user-manual.md) covers the
++model reference and every API; this document describes how a call is
++executed, the contracts between the parts and measured performance.
+ 
+ ## Evaluation pipeline
+ 
+ ```mermaid
+ flowchart TD
+-    P["Prepared model"] --> B["Candidate batch"]
+-    B --> V["Validate IDs and budgets"]
+-    V -->|Single worker or candidate| S["Inline evaluation"]
+-    V -->|Multiple workers| W["Scoped worker evaluation"]
+-    S --> D["Domain kernel and work counter"]
+-    W --> D
+-    D --> R["Ordered typed result"]
+-    R -->|Full| F["Metrics and optional trace"]
+-    R -->|Lean| L["Score and status"]
++    J["JSON candidates (batch, scores, CLI)"] --> D["Decode: fast parameter path, reference fallback"]
++    M["Row-major f64 matrix (score_matrix)"] --> V
++    D --> V["Validate budget, batch size, IDs and traces"]
++    V -->|"one worker or one row"| S["Calling thread"]
++    V -->|"several workers"| W["Calling thread plus scoped workers claim index ranges"]
++    S --> G["Group rows per range"]
++    W --> G
++    G -->|"untraced, valid, no deadline or cancel file"| L["Lockstep lane kernel: 16 lanes AVX-512F, or 8 lanes AVX2 or baseline"]
++    G -->|"traced, monitored budget or single leftover row"| K["Scalar kernel"]
++    L --> R["Per-index result slots in input order"]
++    K --> R
++    R -->|"batch"| F["Typed metrics and optional trace"]
++    R -->|"scores"| N["Status, steps, score, null metrics"]
++    R -->|"score_matrix"| X["MatrixScore rows"]
++    F --> E["Batch::write_json with pre-encoded keys"]
++    N --> E
+ ```
+ 
+ | Boundary | Location | Responsibility |
+ | --- | --- | --- |
+-| Request and CLI | `src/main.rs`, `src/lib.rs`, `models/request.json` | Versioned request schema, exact model-byte hash, typed validation, JSON output and exit code |
+-| Python boundary | `python/robotics_control_craft/__init__.py`, PyO3 in `src/lib.rs` | Encode once per batch, release the Python GIL during native evaluation, decode the typed result envelope |
+-| Prepared engine | `src/lib.rs` | Own immutable domain data, enforce batch rules, dispatch candidates and retain ordered result rows |
+-| Domain | `src/domain.rs` | Bind the candidate, execute model logic, classify status and compute a minimization objective |
++| Request and CLI | `src/main.rs`, `src/lib.rs` (`run`, `capabilities`), `models/request.json` | Versioned request schema, exact model-byte hash, typed validation, JSON output and exit code |
++| Python boundary | `python/robotics_control_craft/__init__.py`, PyO3 module in `src/lib.rs` | Encode model and candidates once per call, release the GIL during native evaluation, decode the result envelope; `score_matrix` passes rows as `f64` lists and returns three lists |
++| Prepared engine | `src/lib.rs` | Own the immutable domain model, decode candidates, enforce batch rules, dispatch rows, group untraced rows for the lane kernel, keep ordered results and encode JSON |
++| Domain | `src/domain.rs` | Validate the model at preparation, check candidate parameters, integrate with the scalar or lane kernel, classify status and compute the minimization objective and metrics |
+ | Campaign | `python/robotics_control_craft/campaign.py` | Local SQLite replay, attempt journal and complete-result caching |
+-| Verification | `validation/`, `examples/`, `evidence/` | Independent checks, executable examples and paired performance observations |
++| Verification | `validation/`, `examples/`, `src/breakdown.rs`, `evidence/` | Independent oracle checks, executable examples, paired performance observations and phase timing |
+ 
+ ## Data and execution contracts
+ 
+-`Prepared::new` hashes the model bytes, deserializes the model and
+-validates its bounds before building domain caches. The Python
+-wrapper encodes models with sorted keys and finite JSON numbers.
+-Two inputs that differ in their serialized representation can
+-have different provenance hashes. Result and request schema tags
+-remain at 0.1. Package version is reported separately.
+-
+-Every batch validates candidate count (1–4096), unique IDs, parameter
+-vector length (up to 64), requested workers (1–64) and trace count
+-(up to 16). Parallel workers claim indexes through an atomic cursor.
+-Each assigned index owns a result slot written once. After workers
+-join, output is serialized in input order. Single-worker or singleton
+-calls run inline. The typed prepared envelope borrows candidate IDs
+-until serialization completes. The CLI retains its full `Value` API.
+-
+-`Work` counts domain-defined steps per candidate. Its fast branch
+-handles unmonitored steps below the limit. Monitored steps check
+-the cancel file, then batch deadline, then work budget. Domain
+-checks can still reject an invalid candidate before it takes a step.
+-Cancellation and deadlines are cooperative. The wall clock can
+-change which candidates finish, while fixed-work replays should agree
+-independent of worker count. Candidate parallelism creates scoped
+-threads per batch. Concurrent callers should account for total
+-worker demand when choosing batch settings.
+-
+-Full records contain domain metrics and any requested trace.
+-`scores_json` in Rust and `Prepared.scores` in Python return the
+-same record keys with null metrics and reject traced candidates.
+-Both retain per-candidate limits, diagnostics needed for feasibility,
+-numeric score checks and failure status. Full replay restores
+-inspection details for the selected candidate.
++### Preparation
++
++`Prepared::new` hashes the exact model bytes with SHA-256, deserializes the
++model (unknown fields are rejected) and validates its ranges, the declared
++stability envelope and the control settings. It then caches the reciprocal
++mass and detects AVX2 and AVX-512F support with
++`is_x86_feature_detected!`, which selects the lane kernel for every later
++call. The Python wrapper encodes models with sorted keys and compact
++separators. Two inputs that differ in their serialized representation can
++have different provenance hashes. Result and request schema tags remain at
++0.1; the package version is reported separately.
++
++### Batches and matrices
++
++The JSON entry points (`evaluate_json`, `scores_json`, the CLI `run` and
++the Python `batch`, `scores` and `evaluate`) validate candidate count
++(1–4096), non-empty unique IDs of at most 128 bytes, parameter vector length
++(up to 64), requested workers (1–64), `max_steps` (1–100,000,000), `wall_ms`
++(1–86,400,000 when given) and the traced-candidate count (up to 16).
++`scores_json` rejects traced candidates.
++
++`Prepared::score_matrix(rows, parameters, budget)` is the typed entry point
++added in 0.3.0. It takes `rows` untraced candidates stored row-major in one
++`&[f64]`; each row has `parameters.len() / rows` values, and dimension 0 is
++allowed. It rejects `rows` outside 1–4096, a length that is not a multiple
++of `rows`, a dimension above 64 and an invalid budget. There are no IDs and
++no duplicate check: rows are numbered by position. Budget JSON, limits,
++dispatch, deadlines, cancellation and failure classification are those of
++`scores_json`, and each `MatrixScore { status, steps, score }` equals the
++lean record of the same parameters, with the score bit for bit. Unit tests
++check this for invalid rows, `max_steps` limits, a cancel file and several
++workers. The Python native method takes `Vec<Vec<f64>>` (ragged rows raise
++`ValueError`), releases the GIL during evaluation and returns
++`(scores, statuses, steps)` with NaN scores for non-complete rows. The
++wrapper also accepts a 2-D NumPy array.
++
++### Decoding
++
++JSON candidate batches are decoded first with a twin of `Candidate` whose
++`parameters` field is borrowed as a raw JSON slice. A single-pass parser
++accepts only the strict JSON number grammar. Numbers with at most 19 digits,
++a mantissa up to 2^53 and a decimal exponent within ±22 use one exact
++multiply or divide (Clinger's fast path); other numbers use
++`str::parse::<f64>`. Both round correctly, as serde_json's
++`float_roundtrip` parser does, so the parsed values are identical. If the
++fast decode fails for any reason (another JSON type, nesting, an infinite
++value or any serde error), the batch is decoded again with the reference
++types, so results and error messages are exactly the reference ones. The
++CLI request uses the same scheme.
++
++### Dispatch and lockstep grouping
++
++With one worker or one row, the calling thread evaluates the whole batch.
++Otherwise the calling thread and up to `workers - 1` scoped threads claim
++index ranges through an atomic cursor. A range is one lane width long (16
++rows with AVX-512F, 8 otherwise), and no more threads are started than
++there are ranges. Each index owns a result slot written once, and output is
++assembled in input order, so results do not depend on the worker count or
++on which thread evaluated a range.
++
++Within a range, when the budget has no `wall_ms` and no `cancel_file`,
++untraced rows whose parameters pass the domain check are collected into a
++lockstep group. A full group, or a final group of at least two rows, runs on
++the lane kernel; unused lanes repeat the last row and are not reported. A
++single leftover row, every traced row and every row under a monitored
++budget use the scalar kernel. Rows that fail the parameter check are
++reported immediately with 0 steps.
++
++### Work, limits and cancellation
++
++`Work` counts one logical step per RK4 step. Its fast branch handles
++unmonitored steps below `max_steps`. Monitored steps check the cancel file
++(a file-system `stat` per step), then the batch deadline (a clock read per
++step), then the step budget. A lockstep group shares one counter because
++all lanes advance on the same grid; a lane that fails keeps the count at
++its failure, and the remaining lanes fail together at the step limit, which
++gives each row the steps of the scalar kernel. Cancellation and deadlines
++are cooperative. The wall clock can change which candidates finish, while
++fixed-work replays agree independent of worker count. Candidate parallelism
++creates scoped threads per call; concurrent callers should account for
++total worker demand.
++
++### Output
++
++Full records contain typed metrics and any requested trace. Lean records
++from `scores_json` and `Prepared.scores` have the same keys with null
++metrics. Both keep the per-candidate limits, the diagnostics needed for
++feasibility, numeric score checks and failure status. Matrix rows carry
++only status, steps and score. `Batch::write_json` writes the envelope,
++record and metrics keys, status strings, schema, version and the trace
++column list as pre-encoded bytes in serde's field order; ids, details,
++failure metrics, numbers and traces go through serde_json. A unit test
++requires byte equality with `serde_json::to_string`. The metrics struct
++declares its fields in alphabetical order, the order of the `Value` maps
++that 0.2.0 produced. The CLI converts the same typed batch into a
++`serde_json::Value`, whose maps also sort keys.
+ 
+ ## Domain internals
+ 
+-The input is a bounded linear oscillator with `held` or `pd` control.
+-Preparation checks model ranges, switch ordering, the declared
+-stability envelope and caches reciprocal mass. Each candidate starts
+-from the immutable initial state with empty trace and fresh counters.
++The model is a bounded linear oscillator with `held` or `pd` control.
++Preparation checks the ranges listed in the user manual, switch ordering,
++the controller interval and the stability envelope
++`dt × (sqrt(k/m) + c/m) ≤ 0.5`. Each candidate starts from the immutable
++initial state with fresh counters.
+ 
+-The outer integration loop selects a force and the next control
+-boundary. The inner RK4 loop advances three stage state variables
+-(position, velocity, and integral of squared tracking error). Squared
+-force is constant throughout the control interval. Its RK4 weight
+-is computed once, then effort is added at each step in the original
+-order. A const parameter specializes tracing so the untraced loop
+-does no trace allocation or trace-limit branch. Full and score calls
+-both enforce trajectory and position limits.
++The outer integration loop selects a force and the next control boundary:
++the candidate's force for the segment (`held`), or the saturated PD force
++from the state at the sample (`pd`). The inner RK4 loop advances position,
++velocity and the integral of the squared tracking error, shortening the
++step at control boundaries and the horizon. Squared force is constant over
++a control interval; its RK4 weight is computed once per segment.
++
++The scalar kernel is specialized by a const parameter for traced and
++untraced candidates. A traced candidate reserves its trace for the expected
++step count and fails as `invalid` on the step after its 10,000th trace row
++(10,001 charged steps).
++
++The lane kernel is generic over its width `N`. It keeps position,
++velocity, error, effort, peak position and peak force as `[f64; N]` arrays
++and performs, per lane, the scalar kernel's IEEE operations in the same
++order; no operation is fused or reassociated, so every lane reproduces the
++scalar result bit for bit. It is compiled three times: as the baseline
++build (SSE2 on x86-64) and with the `avx2` target feature, both with eight
++lanes, and with `avx512f` with sixteen lanes. Rust does not contract
++multiplies and adds even when the target supports FMA. The per-step failure
++test is masked by lane; a failing lane is classified exactly as in the
++scalar kernel (non-finite state before the position limit). The effort
++increment `h × weight / 6` is kept per lane and recomputed only when the
++shared step `h` changes or a segment starts. A unit test compares the three
++compiled kernels bit for bit, and another compares lockstep and scalar
++records byte for byte for every batch size up to 19 rows of each control
++kind, which covers full, padded and single leftover groups.
+ 
+ | Output | Computation or convention |
+ | --- | --- |
+ | Score | Terminal squared position error + 0.1 × terminal velocity squared + mean integrated tracking error + 0.001 × integrated force squared |
+-| Effort | Quadrature of the square of held force |
++| Effort | Quadrature of the square of the held force |
+ | Peak position | Maximum absolute position at accepted grid endpoints, including the initial position |
+-| Trace | Post-step time, position, velocity and force used for that step |
++| Trace | Post-step time, position, velocity and the force used for that step |
++
++Limit events are checked at grid endpoints. The model contains no contact
++or collision backend. The reciprocal mass introduced in 0.2.0 can change
++the last few bits relative to a division. All 0.3.0 changes are
++bit-identical with 0.2.0 on every benchmark workload, which the paired
++checks confirmed byte for byte; validation keeps the independent
++matrix-exponential check and the refined-step held-out replay.
++
++## Changes in 0.3.0
++
++| Round | Structural change |
++| --- | --- |
++| 1 | Typed `score_matrix` API in Rust and Python, a model-hash accessor and a shared dispatch helper |
++| 2 | Lockstep RK4 lanes for untraced rows under unmonitored budgets; workers claim index ranges |
++| 3 | AVX2 build of the lane kernel selected at preparation; eight lanes |
++| 4 | Typed metrics struct instead of a `Value` map |
++| 5 | Typed trace rows serialized directly and reserved up front |
++| 6 | The calling thread is one of the batch workers |
++| 7 | Lane kernel generic over its width; sixteen-lane AVX-512F build |
++| 8 | Fast exact decoding of parameter arrays with reference fallback |
++| 9 | Per-lane effort increment reused while the step repeats |
++| 10 | Batch JSON writer with pre-encoded keys |
++
++The [0.3.0 performance log](../robotics-control-craft-performance-log-0.3.0.md)
++lists the timing of each round and one rejected attempt.
++
++## Performance
++
++All numbers in this section come from one host: 2 vCPUs, Intel(R) Xeon(R)
++Processor @ 2.10GHz under KVM (AVX-512F available, so the sixteen-lane
++kernel was active), Rust 1.97.0 and CPython 3.12.3. Four other projects
++shared the host; every timing ran under a shared CPU lock, but background
++load still varied, so differences below about 5% are within noise. None of
++these numbers is comparable with the 0.2.0 log, which was measured on
++another host.
++
++### 0.2.0 to 0.3.0
++
++Paired runs of the 0.2.0 baseline benchmark binary and the round 10 binary
++(`validation/performance_pair.py --samples 11`, alternating order, model
++preparation and process start excluded). Times are medians per prepared
++call. The `parallel` workload keeps its four workers on this 2-vCPU host.
++The matrix rows compare 0.2.0 lean scores (0.2.0 has no matrix API) with
++0.3.0 `score_matrix`. Evidence: `evidence/performance-0.3.0/cumulative/`.
++
++| Workload | API | 0.2.0 ms | 0.3.0 ms | 0.2.0 / 0.3.0 |
++| --- | --- | ---: | ---: | ---: |
++| Single prepared evaluation | full | 0.0040 | 0.0031 | 1.32x |
++| 96 full records, one worker | full | 0.3549 | 0.0849 | 4.18x |
++| 96 full records, four workers | full | 0.4450 | 0.1869 | 2.38x |
++| 12 traced records | full | 0.2388 | 0.1012 | 2.36x |
++| 1,024 invalid candidates | full | 1.3765 | 1.1183 | 1.23x |
++| 48 domain cases (PD, 4,000 steps) | full | 6.1882 | 0.7384 | 8.38x |
++| 48 secondary domain cases (held, 4,000 steps) | full | 6.3913 | 0.8587 | 7.44x |
++| 96 lean scores | lean | 0.2203 | 0.0580 | 3.80x |
++| 48 lean domain scores | lean | 6.2682 | 0.6744 | 9.29x |
++| 48 lean secondary scores | lean | 6.1974 | 0.8306 | 7.46x |
++| 96 matrix rows | lean → matrix | 0.2371 | 0.0306 | 7.75x |
++| 48 matrix domain rows | lean → matrix | 6.3298 | 0.6165 | 10.27x |
+ 
+-Limit events are checked at grid endpoints. The model contains no
+-contact or collision backend. The reciprocal multiplication can
+-change the last few floating-point bits. Validation retains an
+-independent matrix-exponential check and refined-step held-out replay.
++### Time breakdown
++
++`src/breakdown.rs` (an ignored test, run with
++`cargo test --release --locked --lib breakdown -- --ignored --nocapture`)
++times the phases of one call on the benchmark workloads: decode (candidate
++and budget JSON), evaluate (validation, dispatch, kernels and record
++construction) and encode (result JSON). Cells are medians of three runs.
++Evidence: `evidence/performance-0.3.0/breakdown.json`.
++
++| Workload | Rows | Mode | Decode µs | Evaluate µs | Encode µs | Total µs | µs per row |
++| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
++| `one` | 1 | full | 0.27 | 2.12 | 0.38 | 2.79 | 2.786 |
++| `one` | 1 | lean | 0.26 | 2.12 | 0.15 | 2.53 | 2.531 |
++| `one` | 1 | matrix | – | – | – | 2.09 | 2.093 |
++| `serial` | 96 | full | 15.36 | 34.56 | 25.25 | 75.19 | 0.783 |
++| `serial` | 96 | lean | 15.38 | 32.07 | 5.21 | 53.52 | 0.557 |
++| `serial` | 96 | matrix | – | – | – | 28.98 | 0.302 |
++| `parallel` (4 workers) | 96 | full | 23.26 | 131.90 | 31.76 | 189.21 | 1.971 |
++| `parallel` (4 workers) | 96 | lean | 22.40 | 115.82 | 9.27 | 149.75 | 1.560 |
++| `parallel` (4 workers) | 96 | matrix | – | – | – | 119.18 | 1.241 |
++| `trace` | 12 | full | 3.13 | 28.68 | 82.23 | 117.81 | 9.818 |
++| `invalid` | 1,024 | full | 924.50 | 85.01 | 55.74 | 1070.52 | 1.045 |
++| `invalid` | 1,024 | lean | 954.25 | 87.30 | 58.13 | 1101.27 | 1.075 |
++| `invalid` | 1,024 | matrix | – | – | – | 26.75 | 0.026 |
++| `domain` | 48 | full | 10.50 | 603.68 | 15.06 | 630.25 | 13.130 |
++| `domain` | 48 | lean | 11.21 | 616.84 | 3.51 | 634.23 | 13.213 |
++| `domain` | 48 | matrix | – | – | – | 645.89 | 13.456 |
++| `domain2` | 48 | full | 11.92 | 611.29 | 13.98 | 638.89 | 13.310 |
++| `domain2` | 48 | lean | 12.74 | 586.01 | 3.42 | 603.25 | 12.568 |
++| `domain2` | 48 | matrix | – | – | – | 600.87 | 12.518 |
++
++A 4,000-step rollout costs about 13 µs in a lockstep group, about 3.3 ns
++per lane-step. The three `domain` modes differ by less than the run-to-run
++noise because the kernel dominates.
++
++### Per-call cost of full, lean and matrix calls
++
++Native, from the breakdown: for the 62-step example rollouts in batches of
++96, a full record costs 0.78 µs per row, a lean record 0.56 µs and a matrix
++row 0.30 µs. A single candidate costs 2.8 µs (full), 2.5 µs (lean) or
++2.1 µs (matrix); the single row runs on the latency-bound scalar kernel.
++
++Through the installed Python package (`taskset -c 0`, medians of seven
++repeats of 2,000 rows; evidence
++`evidence/performance-0.3.0/python-call-cost.json`):
++
++| Call | 0.2.0 µs per row | 0.3.0 µs per row |
++| --- | ---: | ---: |
++| `evaluate(x)`, one row | 14.81 | 13.85 |
++| `scores([one candidate])` | 10.40 | 10.71 |
++| `score_matrix([x])`, one row | – | 4.88 |
++| `batch` of 96 rows | 7.56 | 4.44 |
++| `scores` of 96 rows | 3.83 | 3.53 |
++| `score_matrix` of 96 rows | – | 0.80 |
++
++The Python JSON encoding and decoding in the wrapper dominate `evaluate`
++and `scores`; `score_matrix` avoids it.
++
++### Worker scaling
++
++Total call time in µs for one call (breakdown medians; the host has two
++vCPUs and was shared):
++
++| Workload | API | 1 worker | 2 workers | 4 workers |
++| --- | --- | ---: | ---: | ---: |
++| 96 rows, 62 steps | full JSON | 82.5 | 123.0 | 189.6 |
++| 96 rows, 62 steps | matrix | 29.1 | 66.3 | 111.0 |
++| 48 rows, 4,000 steps | full JSON | 657.8 | 478.1 | 523.9 |
++| 48 rows, 4,000 steps | matrix | 629.3 | 448.5 | 460.4 |
++
++Starting and joining scoped threads costs tens of microseconds per thread
++on this host, more than the 62-step batch takes on one thread. The long
++rollouts gain 1.4x from two workers; 48 rows form only three sixteen-row
++ranges, so a third or fourth worker has little to claim, and the host has
++only two vCPUs.
++
++### Monitored budgets
++
++`evidence/performance-0.3.0/monitored-budget.json` scores the 48 long PD
++rollouts through `score_matrix` (one worker, installed wheel):
++
++| Budget | Median ms |
++| --- | ---: |
++| none (lockstep lanes) | 0.632 |
++| `wall_ms: 60000` (scalar kernel, clock read per step) | 12.99 |
++| `cancel_file` that does not exist (scalar kernel, `stat` per step) | 96.95 |
++
++Results are identical in all three cases. A monitored budget uses the
++scalar kernel and checks on every step; the cancel-file check is a system
++call. This cost predates 0.3.0, since 0.2.0 checks the same way, but it is
++now the largest avoidable cost. A future change could check the clock and
++the file every few thousand steps.
++
++### Installed Python optimization
++
++`validation/optimize_performance.py` runs a seeded SciPy differential
++evolution (48 objective calls, one candidate per call) and a traced replay
++of the winner, seven runs per configuration on one logical CPU
++(`taskset -c 0`). The 0.3.0 wheel was built with maturin 1.9.6 from the
++extracted 0.3.0 sdist; the 0.2.0 wheel is the one from the 0.2.0 delivery.
++Evidence: `evidence/performance-0.3.0/python-optimization.json`.
++
++| Configuration | Prepare ms | Search ms | Replay ms | Total ms | Baseline / total |
++| --- | ---: | ---: | ---: | ---: | ---: |
++| v0.2.0-full | 0.101 | 8.316 | 0.181 | 8.632 | 1.00x |
++| v0.2.0-scores | 0.094 | 5.146 | 0.156 | 5.386 | 1.60x |
++| v0.3.0-full | 0.151 | 6.014 | 0.136 | 6.317 | 1.37x |
++| v0.3.0-scores | 0.151 | 5.325 | 0.128 | 5.707 | 1.51x |
++| v0.3.0-matrix | 0.142 | 4.583 | 0.151 | 4.905 | 1.76x |
++
++The total median is computed per run. All configurations agreed on 48
++evaluations, 0 failures, the final parameters
++`[5.574900894396944, 2.6972219501353756]` and the replay score
++0.24281542939165648. Individual search times ranged over about a factor of
++two because of host load, so the medians separate only large effects. The
++search is dominated by SciPy's own work: 4.6–8.3 ms of median search time
++for 48 evaluations is 95–175 µs per evaluation, against 5–14 µs per
++objective call. The first `Prepared` in a fresh process takes about
++0.15 ms in 0.3.0 against 0.08–0.10 ms in 0.2.0 (one-time CPU feature
++detection and first use of the larger binary); later preparations cost the
++same, about 6 µs including the wrapper
++(`evidence/performance-0.3.0/python-call-cost.json`).
++
++### What dominates now and which API to use
++
++- Long rollouts are bound by the lane kernel: the RK4 step is a chain of
++  dependent multiplies, adds and one division, and the sixteen-lane
++  AVX-512F kernel runs two independent chains. Hosts without AVX-512F use
++  eight lanes; hosts without AVX2 use the baseline build.
++- Short rollouts called through JSON spend about a fifth of a full call in
++  decoding and a third in encoding. `score_matrix` removes both.
++- Large JSON batches of long parameter vectors (the `invalid` workload) are
++  dominated by decoding, 86% of the call.
++- Traced calls are dominated by formatting the trace floats.
++- A single candidate runs on the scalar kernel, whose cost is the latency
++  of one dependency chain.
++- In Python, one-candidate-at-a-time optimizers pay the wrapper and the
++  optimizer overhead, which exceed the native cost of the example model.
++
++Guidance:
++
++- For optimizers, score whole populations with `score_matrix` (SciPy
++  `differential_evolution(vectorized=True)`, fcmaes ask/tell). Use at least
++  16 rows per call on AVX-512F hosts and 8 otherwise so that the lane kernel
++  is used. Use `scores` when you need JSON records with IDs, and `batch`
++  when you need metrics.
++- Do not set `wall_ms` or `cancel_file` in tight optimization loops. Use
++  them for long campaigns, where the per-step check is affordable.
++- Keep `workers=1` for cheap rollouts. Use two workers on this kind of
++  host when each call contains at least a few hundred thousand steps and
++  at least two lane groups per worker; more workers than CPUs do not help.
++- Request traces only for replay of selected candidates.
+ 
+ ## Persistence and boundaries of evidence
+ 
+-The local campaign hashes the installed extension bytes plus each
+-scenario, model, candidate and work settings to locate reusable
+-records. SQLite stores completed, invalid and infeasible results,
+-and keeps an append-only journal of attempts. Cancelled or time-
+-limited attempts remain in the journal and can be retried. SQLite
+-commits each chunk atomically. A new extension build changes the
+-cache namespace. The current workflow is local and exposes no
+-distributed worker protocol.
+-
+-The package contains source, a source distribution, and a validated
+-Linux x86-64 wheel. The included performance log distinguishes the
+-native prepared boundary, complete Python search and clean build.
+-See the [tutorial](tutorial.md) for exact commands and
++The local campaign hashes the installed extension bytes plus each scenario,
++model, candidate and work settings to locate reusable records. SQLite
++stores completed, invalid and infeasible results, and keeps an append-only
++journal of attempts. Canceled or time-limited attempts remain in the
++journal and can be retried. SQLite commits each chunk atomically. A new
++extension build changes the cache namespace. The current workflow is local
++and exposes no distributed worker protocol.
++
++The package contains source, a source distribution and a validated Linux
++x86-64 wheel. The performance logs distinguish the native prepared
++boundary, the complete Python search and the clean build. See the
++[user manual](user-manual.md) and [tutorial](tutorial.md) for commands and
+ [the model card](model.md) for equations and research scope.
+diff --git a/docs/model.md b/docs/model.md
+index 8c60a82..33c36cd 100644
+--- a/docs/model.md
++++ b/docs/model.md
+@@ -1,7 +1,7 @@
+ # Bounded oscillator model
+ 
+ The native evaluator integrates a one-dimensional mass–spring–damper.
+-The state is position in metres and velocity in metres per second.
++The state is position in meters and velocity in meters per second.
+ Acceleration is force minus spring and damper forces, divided by mass.
+ Time is in seconds and input force is in newtons.
+ 
+diff --git a/docs/tutorial.md b/docs/tutorial.md
+index 2965846..11493dd 100644
+--- a/docs/tutorial.md
++++ b/docs/tutorial.md
+@@ -1,6 +1,6 @@
+ # Robotics Control Craft tutorial
+ 
+-Optimize sampled control and held actuation for a bounded mass–spring–damper oscillator. This guide uses the examples shipped with version 0.2.0.
++Optimize sampled control and held actuation for a bounded mass–spring–damper oscillator. This guide uses the examples shipped with version 0.3.0. The [user manual](user-manual.md) is the complete reference, and [`examples/python/`](../examples/python/README.md) holds longer application and optimization scripts.
+ 
+ ## 1. Install and run the example
+ 
+@@ -15,8 +15,9 @@ python -m pip install --no-deps packages/*.whl
+ ```
+ 
+ If the wheel tag is incompatible, build the supplied Rust/Python source
+-on the target system with Rust 1.88+ and Maturin 1.9.6. Cargo needs the
+-locked dependencies available from its registry or cache.
++on the target system with Rust 1.88+ and Maturin 1.9.6 (this release was
++built and tested with Rust 1.97). Cargo needs the locked dependencies
++available from its registry or cache.
+ 
+ ```sh
+ python -m pip install 'maturin==1.9.6'
+@@ -104,19 +105,44 @@ print(replay["score"], replay["metrics"])
+ Replace the duplicate vectors with distinct choices for a real search.
+ Use `batch` if you need the full metrics for every row. `scores` returns
+ ordered records with score, status, steps and detail, and `metrics: null`.
+-It rejects any candidate with `trace: true`. A one-worker batch or a
+-singleton runs inline. Larger batches can try two or four workers.
+-Measure before setting a worker count for a real workload.
++It rejects any candidate with `trace: true`.
++
++Optimizers that only need objective values can skip JSON entirely with
++`score_matrix`. It takes a list of equal-length rows or a 2-D NumPy array
++and returns three lists in row order. Scores are NaN for rows that did not
++complete; statuses and steps match `scores` exactly.
++
++```python
++rows = [c["parameters"] for c in candidates] + [[-1.0, 2.0]]
++values, statuses, steps = prepared.score_matrix(rows)
++lean = prepared.scores([{"id": str(i), "parameters": r} for i, r in enumerate(rows)])
++assert statuses == [r["status"] for r in lean["records"]]
++assert steps == [r["steps"] for r in lean["records"]]
++print(values, statuses, steps)
++```
++
++A one-worker call or a single row runs on the calling thread. Untraced
++rows are integrated in lockstep groups of 16 (8 on hosts without AVX-512F),
++so send whole populations in one call. Thread start-up costs tens of
++microseconds; keep one worker for cheap rollouts and measure before setting
++a worker count for a real workload. Avoid `wall_ms` and `cancel_file` in
++tight loops: they switch to the one-candidate-at-a-time kernel with a
++per-step check.
+ 
+ The optional differential-evolution driver times preparation, seeded
+ search and traced replay as one run. Install SciPy for this example.
+ 
+ ```sh
+ python -m pip install scipy
++python validation/optimize_performance.py robotics_control_craft --matrix
+ python validation/optimize_performance.py robotics_control_craft --scores
+ python validation/optimize_performance.py robotics_control_craft
+ ```
+ 
++All three modes run the same seeded search and objective sequence and
++report the same result; they differ only in the API used for each
++objective call.
++
+ The driver uses small local bounds and a short fixed search budget.
+ For a scientific result, use problem-specific bounds, an explicit
+ feasibility penalty or constraint policy, and a held-out evaluation.
+@@ -144,8 +170,10 @@ cargo build --release --locked --bins --examples
+ target/release/robotics-control-craft describe
+ target/release/robotics-control-craft run models/request.json
+ target/release/examples/sweep models/example.json
++target/release/examples/matrix models/example.json
+ target/release/examples/performance models/example.json serial
+ CRAFT_SCORES=1 target/release/examples/performance models/example.json serial
++CRAFT_MATRIX=1 target/release/examples/performance models/example.json serial
+ ```
+ 
+ The CLI reads a request file or standard input with `run -`. Exit code
+@@ -154,19 +182,24 @@ indicates one or more unsuccessful rows in a well-formed request.
+ The benchmark prints elapsed seconds per prepared batch after warm-up.
+ Use `parallel` for four workers, `trace` for traced evaluations,
+ or `domain` and `domain2` for the package's supplemental cases.
+-With a previous benchmark executable built from the baseline and this
+-one, `validation/performance_pair.py BEFORE AFTER models/example.json serial`
+-checks output parity and times both. See the included performance log
+-and raw evidence for the exact workloads and comparison boundaries.
++`CRAFT_SCORES=1` selects the lean API and `CRAFT_MATRIX=1` the typed
++matrix API. With a previous benchmark executable built from the baseline
++and this one, `validation/performance_pair.py BEFORE AFTER models/example.json serial`
++checks output parity and times both; `--before-scores`, `--after-scores`,
++`--before-matrix` and `--after-matrix` choose the API per side. See the
++performance logs and raw evidence for the exact workloads and comparison
++boundaries.
+ 
+ ## 6. Verify results
+ 
+ ```sh
+ cargo test --release --locked
+-cargo clippy --locked --all-targets --features python -- -D warnings
++PYO3_PYTHON=python3 cargo clippy --release --locked --all-targets --features python -- -D warnings
+ python validation/validate.py target/release/robotics-control-craft
+ ```
+ 
+-Consult the [model card](model.md) for supported inputs, the
+-[architecture guide](architecture.md) for data flow and numerical
+-assumptions, and the [source notes](sources.md) for references.
++Consult the [user manual](user-manual.md) for the complete model and API
++reference, the [model card](model.md) for equations, the
++[architecture guide](architecture.md) for data flow, numerical assumptions
++and measured performance, and the [source notes](sources.md) for
++references.
+diff --git a/docs/user-manual.md b/docs/user-manual.md
+new file mode 100644
+index 0000000..0aa2e64
+--- /dev/null
++++ b/docs/user-manual.md
+@@ -0,0 +1,1086 @@
++# Robotics Control Craft user manual
++
++Version 0.3.0. This manual is for researchers and engineers who use the
++bounded oscillator model to study, compare and optimize controllers. It
++covers installation, the model and its JSON reference, every API (Python,
++Rust and command line), budgets, statuses and errors, reproducibility,
++performance and troubleshooting. Every Python block in this manual runs as
++shown, in order, in one Python session; `validation/release_checks.py`
++executes all of them against the installed package. Outputs shown after a
++block come from an actual run.
++
++Contents:
++
++1. [Install](#1-install)
++2. [Concepts](#2-concepts)
++3. [Model JSON reference](#3-model-json-reference)
++4. [Candidates, requests and results](#4-candidates-requests-and-results)
++5. [Statuses and error messages](#5-statuses-and-error-messages)
++6. [Budgets](#6-budgets)
++7. [Python API](#7-python-api)
++8. [Application scenarios](#8-application-scenarios)
++9. [Optimization](#9-optimization)
++10. [Campaigns](#10-campaigns)
++11. [Rust API](#11-rust-api)
++12. [Command line](#12-command-line)
++13. [Reproducibility and provenance](#13-reproducibility-and-provenance)
++14. [Performance tips](#14-performance-tips)
++15. [Troubleshooting](#15-troubleshooting)
++
++## 1. Install
++
++### Wheel
++
++The release ZIP contains a wheel for Linux x86-64 with the CPython 3.10+
++stable ABI, tested with CPython 3.12. Install it into a virtual environment
++from the package root:
++
++```sh
++python3 -m venv .venv
++. .venv/bin/activate
++python -m pip install --no-deps packages/robotics_control_craft-0.3.0-cp310-abi3-manylinux_2_34_x86_64.whl
++python -m pip install numpy scipy fcmaes   # only for the examples and validation
++```
++
++The package itself has no Python dependencies. NumPy is needed only to pass
++2-D arrays to `score_matrix`; SciPy and fcmaes are used by the examples and
++the validation scripts.
++
++### From source
++
++The source distribution `packages/robotics_control_craft-0.3.0.tar.gz`
++builds with Maturin 1.9.6 and Rust 1.88 or later (`rust-version` in
++`Cargo.toml`; this release was built and tested with Rust 1.97). Cargo
++needs the locked dependencies from its registry or cache.
++
++```sh
++python -m pip install 'maturin==1.9.6'
++tar -xzf packages/robotics_control_craft-0.3.0.tar.gz
++cd robotics_control_craft-0.3.0
++maturin build --release --locked --out dist
++python -m pip install --no-deps dist/*.whl
++```
++
++### Command line and Rust crate
++
++```sh
++cargo build --release --locked --bins --examples
++target/release/robotics-control-craft describe
++```
++
++The crate archive `packages/robotics-control-craft-0.3.0.crate` can be used
++as a path or vendored dependency. The `python` feature builds the PyO3
++extension and is off by default.
++
++Check the installation:
++
++```python
++import robotics_control_craft
++from robotics_control_craft import Prepared, load_example
++
++case = load_example()
++prepared = Prepared(case["model"])
++row = prepared.evaluate(case["parameters"])
++print(row["status"], row["steps"], round(row["score"], 6))
++```
++
++```text
++complete 62 0.261834
++```
++
++## 2. Concepts
++
++- **Model.** A one-dimensional mass–spring–damper with position `x` (m) and
++  velocity `v` (m/s): `m·dv/dt = F − k·x − c·v`. The force `F` (N) comes from
++  the controller and is limited to `±force_limit_n`. The model also fixes
++  the initial state, the target position, the integration step, the horizon
++  and a position limit.
++- **Control kind.** `held` applies one constant force per segment between
++  fixed switch times; the candidate supplies the forces. `pd` samples the
++  state every `interval_s`, computes `F = kp·(target − x) − kd·v`, saturates
++  it and holds it until the next sample; the candidate supplies `[kp, kd]`.
++- **Candidate.** A parameter vector to evaluate, with an ID in the JSON APIs.
++- **Rollout.** Classical RK4 integration from the initial state to the
++  horizon. The step shortens to land exactly on control boundaries and on
++  the horizon. Each RK4 step is one logical *step* of work.
++- **Score.** A value to minimize:
++  `(x_T − target)² + 0.1·v_T² + (∫(x − target)² dt)/T + 0.001·∫F² dt`.
++  It is reported only for complete rollouts.
++- **Status.** Every candidate ends as `complete`, `invalid`, `infeasible`,
++  `work_limit`, `wall_limit` or `cancelled` (section 5). A rollout is
++  infeasible when `|x|` exceeds the position limit at a step endpoint.
++- **Prepared model.** `Prepared(model)` validates the model once and is then
++  reused for any number of calls. Each call evaluates candidates
++  independently and returns them in input order.
++- **Full, lean and matrix calls.** `batch` returns full records with metrics
++  and optional traces, `scores` returns the same records with `metrics: null`,
++  and `score_matrix` takes a numeric matrix and returns scores, statuses and
++  steps without JSON. All three give identical statuses, steps and scores.
++- **Budget.** Per-call settings: worker threads, a per-candidate step limit,
++  an optional wall-clock deadline and an optional cancel file (section 6).
++
++## 3. Model JSON reference
++
++A model is a JSON object with exactly these fields; all are required, and
++unknown fields are rejected. JSON integers are accepted for numbers.
++
++| Field | Type | Unit | Allowed values | Meaning |
++| --- | --- | --- | --- | --- |
++| `mass_kg` | number | kg | 0.001 to 10,000 | Moving mass `m` |
++| `spring_n_per_m` | number | N/m | 0 to 100,000 | Spring stiffness `k` |
++| `damping_ns_per_m` | number | N·s/m | 0 to 100,000 | Viscous damping `c` |
++| `initial_x_m` | number | m | `|x0| ≤ position_limit_m` | Initial position |
++| `initial_v_m_s` | number | m/s | `|v0| ≤ 100,000` | Initial velocity |
++| `target_m` | number | m | `|target| ≤ position_limit_m` | Target position for the error terms and the PD law |
++| `dt_s` | number | s | 1e-6 to 10, and the stability envelope below | Nominal RK4 step |
++| `horizon_s` | number | s | 1e-6 to 100,000 | Rollout length `T` |
++| `force_limit_n` | number | N | 0.001 to 100,000 | Saturation of the PD force; bound on held forces |
++| `position_limit_m` | number | m | 0.001 to 100,000 | `|x|` above this at a step endpoint is infeasible |
++| `control` | object | – | see below | Control kind and its settings |
++
++The stability envelope requires `dt_s × (sqrt(k/m) + c/m) ≤ 0.5`.
++
++`control` is one of:
++
++| `kind` | Other field | Type | Allowed values |
++| --- | --- | --- | --- |
++| `"held"` | `switches_s` | array of numbers (s) | at most 63 entries, strictly increasing, each strictly between 0 and `horizon_s` |
++| `"pd"` | `interval_s` | number (s) | 1e-6 to `horizon_s` |
++
++There are no defaults. A model that breaks a rule raises `ValueError` in
++Python (or rejects the request in the CLI) with one of these messages:
++
++| Message | Cause |
++| --- | --- |
++| `invalid oscillator state, coefficients, limits or time grid` | A field outside its range in the first table |
++| `time step outside declared stability envelope` | `dt_s × (sqrt(k/m) + c/m) > 0.5` |
++| `switch times must increase inside horizon` | Held switches not increasing, outside `(0, horizon_s)` or more than 63 |
++| `invalid controller sampling interval` | PD `interval_s` outside `[1e-6, horizon_s]` |
++| `unknown field ...`, `missing field ...`, `unknown variant ...` | JSON shape errors reported by the decoder |
++
++The packaged example is a PD model:
++
++```python
++import json
++print(json.dumps(case["model"], indent=1))
++```
++
++```text
++{
++ "mass_kg": 1,
++ "spring_n_per_m": 1,
++ "damping_ns_per_m": 0.4,
++ "initial_x_m": 1,
++ "initial_v_m_s": 0.2,
++ "target_m": 0,
++ "dt_s": 0.04,
++ "horizon_s": 2.05,
++ "force_limit_n": 3,
++ "position_limit_m": 2,
++ "control": {
++  "kind": "pd",
++  "interval_s": 0.1
++ }
++}
++```
++
++A held model with three segments, and the validation messages:
++
++```python
++held_model = dict(case["model"], control={"kind": "held", "switches_s": [0.4, 1.1]})
++Prepared(held_model)
++
++def rejected(model):
++    try:
++        Prepared(model)
++    except ValueError as error:
++        return str(error)
++    return "accepted"
++
++print(rejected(case["model"] | {"mass_kg": 0}))
++print(rejected(case["model"] | {"dt_s": 0.5}))
++print(rejected(held_model | {"control": {"kind": "held", "switches_s": [1.1, 0.4]}}))
++print(rejected(case["model"] | {"control": {"kind": "pd", "interval_s": 5.0}}))
++print(rejected(case["model"] | {"friction": 0.1}))
++print(rejected({k: v for k, v in case["model"].items() if k != "target_m"}))
++print(rejected(case["model"] | {"control": {"kind": "lqr"}}))
++```
++
++```text
++invalid oscillator state, coefficients, limits or time grid
++time step outside declared stability envelope
++switch times must increase inside horizon
++invalid controller sampling interval
++unknown field `friction`, expected one of `mass_kg`, `spring_n_per_m`, `damping_ns_per_m`, `initial_x_m`, `initial_v_m_s`, `target_m`, `dt_s`, `horizon_s`, `force_limit_n`, `position_limit_m`, `control` at line 1 column 105
++missing field `target_m` at line 1 column 200
++unknown variant `lqr`, expected `held` or `pd` at line 1 column 24
++```
++
++## 4. Candidates, requests and results
++
++### Candidate parameters
++
++| Control kind | `parameters` | Rule; otherwise the status is `invalid` with this detail |
++| --- | --- | --- |
++| `held` | one force (N) per segment: `len(switches_s) + 1` values | every force finite with `|F| ≤ force_limit_n`; detail `one force within limits per held-control segment` |
++| `pd` | `[kp, kd]`: proportional gain (N/m) and derivative gain (N·s/m) | exactly two values, each from 0 to 100,000; detail `expected nonnegative proportional and derivative gains` |
++
++A candidate that fails these rules takes 0 steps. The batch is still
++evaluated; only that candidate is invalid.
++
++### Candidate objects (JSON APIs)
++
++| Field | Type | Rules |
++| --- | --- | --- |
++| `id` | string | 1 to 128 bytes, unique within a call |
++| `parameters` | array of numbers | at most 64 values; the control rules above decide validity |
++| `trace` | boolean | optional, default `false`; at most 16 traced candidates per call; not allowed in `scores` |
++
++### Request (command line)
++
++```json
++{
++  "schema": "robotics-control-craft.request/0.1",
++  "model": {"...": "a model object"},
++  "candidates": [{"id": "a", "parameters": [4, 2], "trace": false}],
++  "budget": {"workers": 1}
++}
++```
++
++`budget` is optional. Unknown fields are rejected at every level.
++
++### Result
++
++| Field | Type | Meaning |
++| --- | --- | --- |
++| `model_sha256` | string | SHA-256 of the exact model bytes that were prepared |
++| `records` | array | One record per candidate, in input order |
++| `schema` | string | `robotics-control-craft.result/0.1` |
++| `version` | string | Package version, `0.3.0` |
++
++Each record has:
++
++| Field | Type | Meaning |
++| --- | --- | --- |
++| `id` | string | Candidate ID |
++| `status` | string | See section 5 |
++| `steps` | integer | RK4 steps charged to the candidate |
++| `score` | number or null | Objective; a finite number only for `complete` |
++| `metrics` | object or null | Full calls, complete rows only; `null` in `scores` |
++| `detail` | string or null | Failure explanation; `null` for `complete` |
++
++Metrics of a complete full record:
++
++| Key | Unit | Meaning |
++| --- | --- | --- |
++| `terminal_position_m` | m | `x` at the horizon |
++| `terminal_velocity_m_s` | m/s | `v` at the horizon |
++| `integrated_error` | m²·s | `∫(x − target)² dt` (RK4 quadrature) |
++| `integrated_force_squared` | N²·s | `∫F² dt` |
++| `max_abs_position_m` | m | largest `|x|` at step endpoints, including the initial state |
++| `max_abs_force_n` | N | largest applied `|F|` |
++| `trace_columns` | strings | always `["t_s", "x_m", "v_m_s", "held_force_n"]` |
++| `trace` | array or null | rows `[t, x, v, F]` after each step when `trace` was requested; `null` otherwise |
++
++```python
++result = prepared.batch([{"id": "packaged", "parameters": case["parameters"]}])
++print(sorted(result))
++record = result["records"][0]
++print(sorted(record))
++print({k: round(v, 6) for k, v in record["metrics"].items() if isinstance(v, float)})
++score_terms = (record["metrics"]["terminal_position_m"] ** 2
++               + 0.1 * record["metrics"]["terminal_velocity_m_s"] ** 2
++               + record["metrics"]["integrated_error"] / case["model"]["horizon_s"]
++               + 0.001 * record["metrics"]["integrated_force_squared"])
++print(abs(score_terms - record["score"]) < 1e-12)
++```
++
++```text
++['model_sha256', 'records', 'schema', 'version']
++['detail', 'id', 'metrics', 'score', 'status', 'steps']
++{'integrated_error': 0.499964, 'integrated_force_squared': 4.143846, 'max_abs_force_n': 3.0, 'max_abs_position_m': 1.004752, 'terminal_position_m': -0.101846, 'terminal_velocity_m_s': 0.185272}
++True
++```
++
++## 5. Statuses and error messages
++
++| Status | Detail | Steps | Meaning |
++| --- | --- | --- | --- |
++| `complete` | `null` | all steps | Rollout reached the horizon; `score` is finite |
++| `invalid` | `one force within limits per held-control segment` | 0 | Held parameters have the wrong count or a force outside the limit |
++| `invalid` | `expected nonnegative proportional and derivative gains` | 0 | PD parameters are not two gains from 0 to 100,000 |
++| `invalid` | `trace requires at most 10,000 integration steps` | 10,001 | A traced rollout needs more than 10,000 steps |
++| `invalid` | `nonfinite trajectory` | step reached | The state or effort became infinite or NaN |
++| `invalid` | `nonfinite objective` | all steps | The score overflowed |
++| `invalid` | `time step does not advance` | step reached | The time grid stopped advancing in floating point |
++| `infeasible` | `position limit exceeded` | step reached | `|x|` exceeded `position_limit_m` |
++| `work_limit` | `candidate step budget reached` | `max_steps` | The candidate needed more than `max_steps` steps |
++| `wall_limit` | `batch deadline reached` | step reached | The call's `wall_ms` deadline passed |
++| `cancelled` | `cancel file exists` | step reached | The `cancel_file` existed when a step was about to start |
++
++Each status from the model alone:
++
++```python
++import tempfile
++from pathlib import Path
++
++def status(model, parameters, **options):
++    row = Prepared(model).evaluate(parameters, **options)
++    return row["status"], row["steps"], row["detail"]
++
++near_limit = case["model"] | {"target_m": 1.8, "initial_x_m": 0.0, "initial_v_m_s": 0.0}
++print(status(case["model"], [4, 2]))
++print(status(case["model"], [-1, 2]))
++print(status(held_model, [-1.0, 0.0]))
++print(status(held_model, [-1.0, 0.0, 4.0]))
++print(status(near_limit, [30.0, 0.0]))
++print(status(case["model"], [4, 2], max_steps=10))
++print(status(case["model"] | {"dt_s": 1e-4}, [4, 2], trace=True))
++with tempfile.TemporaryDirectory() as folder:
++    flag = Path(folder) / "stop"
++    flag.touch()
++    print(status(case["model"], [4, 2], cancel_file=str(flag)))
++long_model = case["model"] | {"dt_s": 1e-4, "horizon_s": 50.0}
++print(status(long_model, [4, 2], wall_ms=1)[0])
++```
++
++```text
++('complete', 62, None)
++('invalid', 0, 'expected nonnegative proportional and derivative gains')
++('invalid', 0, 'one force within limits per held-control segment')
++('invalid', 0, 'one force within limits per held-control segment')
++('infeasible', 41, 'position limit exceeded')
++('work_limit', 10, 'candidate step budget reached')
++('invalid', 10001, 'trace requires at most 10,000 integration steps')
++('cancelled', 0, 'cancel file exists')
++wall_limit
++```
++
++Errors that reject a whole call raise `ValueError` in Python, return `Err`
++in Rust and exit with status 1 in the CLI:
++
++| Message | Cause |
++| --- | --- |
++| `invalid budget or batch size` | Budget out of range, or 0 or more than 4,096 candidates |
++| `invalid or duplicate candidate id, or parameter vector exceeds limit` | Empty, long or duplicate ID, or more than 64 parameters |
++| `at most 16 traced candidates per batch` | Too many traced candidates |
++| `scores mode accepts untraced candidates only` | `trace: true` in `scores` |
++| `matrix rows must be between 1 and 4096` | `score_matrix` with 0 or more than 4,096 rows |
++| `parameter matrix length is not a multiple of rows` | Rust `score_matrix` with a ragged flat buffer |
++| `parameter vector exceeds limit` | `score_matrix` rows longer than 64 |
++| `parameter rows must all have the same length` | Python `score_matrix` with ragged rows |
++| `score_matrix expects a 2-D array of parameter rows` | Python `score_matrix` with a NumPy array that is not 2-D |
++| `unsupported request schema` | CLI request with another schema tag |
++| `request exceeds 16 MiB` | CLI input too large |
++| JSON decoder messages | Malformed JSON, missing or unknown fields, wrong types |
++
++```python
++def call_error(function, *args, **budget):
++    try:
++        function(*args, **budget)
++    except ValueError as error:
++        return str(error)
++    return "accepted"
++
++one = {"id": "a", "parameters": [4, 2]}
++print(call_error(prepared.batch, [one], workers=0))
++print(call_error(prepared.batch, [one, one]))
++print(call_error(prepared.batch, [{"id": f"t{i}", "parameters": [4, 2], "trace": True} for i in range(17)]))
++print(call_error(prepared.scores, [one | {"trace": True}]))
++print(call_error(prepared.score_matrix, []))
++print(call_error(prepared.score_matrix, [[4, 2], [4]]))
++print(call_error(prepared.batch, [{"id": "a", "parameters": [4, 2], "weight": 1}]))
++```
++
++```text
++invalid budget or batch size
++invalid or duplicate candidate id, or parameter vector exceeds limit
++at most 16 traced candidates per batch
++scores mode accepts untraced candidates only
++matrix rows must be between 1 and 4096
++parameter rows must all have the same length
++unknown field `weight`, expected one of `id`, `parameters`, `trace` at line 1 column 38
++```
++
++## 6. Budgets
++
++Every call accepts the same budget, as keyword arguments in Python or a JSON
++object elsewhere. Unknown keys are rejected.
++
++| Key | Type | Default | Allowed | Effect |
++| --- | --- | --- | --- | --- |
++| `workers` | integer | 1 | 1 to 64 | Threads for the call, including the calling thread |
++| `max_steps` | integer | 1,000,000 | 1 to 100,000,000 | Step limit per candidate; reaching it gives `work_limit` |
++| `wall_ms` | integer or null | none | 1 to 86,400,000 | Deadline for the whole call; later steps give `wall_limit` |
++| `cancel_file` | path string or null | none | any path | If the file exists before a step, the candidate is `cancelled` |
++
++Results do not depend on `workers`. `max_steps` is deterministic. `wall_ms`
++and `cancel_file` are cooperative and checked before every step, so which
++candidates finish depends on timing. These two settings also switch the call
++to the one-candidate-at-a-time kernel and add a clock read or a file-system
++check per step, which makes long rollouts many times slower (section 14).
++
++```python
++rows = [{"id": f"c{i}", "parameters": [4 + i, 2]} for i in range(20)]
++serial = prepared.batch(rows)
++parallel = prepared.batch(rows, workers=4)
++print(serial["records"] == parallel["records"])
++limited = prepared.scores(rows[:3], max_steps=30)
++print([(r["status"], r["steps"]) for r in limited["records"]])
++generous = prepared.scores(rows[:3], wall_ms=60_000)
++print([r["status"] for r in generous["records"]])
++```
++
++```text
++True
++[('work_limit', 30), ('work_limit', 30), ('work_limit', 30)]
++['complete', 'complete', 'complete']
++```
++
++## 7. Python API
++
++```python
++from robotics_control_craft import Prepared, load_example
++from robotics_control_craft import campaign
++```
++
++| Name | Signature | Returns |
++| --- | --- | --- |
++| `load_example()` | – | `{"model": ..., "parameters": ...}`, the packaged PD example |
++| `Prepared(model)` | `model`: dict | Prepared model; raises `ValueError` for an invalid model |
++| `Prepared.batch` | `(candidates, **budget)` | Result dict with full records |
++| `Prepared.scores` | `(candidates, **budget)` | Result dict with `metrics: null`; untraced candidates only |
++| `Prepared.score_matrix` | `(rows, **budget)` | `(scores, statuses, steps)` lists; NaN score for non-complete rows |
++| `Prepared.evaluate` | `(parameters, *, trace=False, **budget)` | One full record (ID `"one"`) |
++| `Prepared.model_sha256` | property | Hex SHA-256 of the encoded model |
++| `campaign.run` | `(database, scenarios, candidates, *, workers=1, chunk_size=16, **budget)` | Rows in manifest order (section 10) |
++| `campaign.digest` | `(value)` | SHA-256 of the canonical JSON encoding |
++
++All native work releases the GIL, so other Python threads keep running.
++`batch`, `scores` and `evaluate` encode their arguments as JSON with sorted
++keys and finite numbers; NaN or infinite parameters raise `ValueError` from
++the encoder. `score_matrix` passes numbers directly, so NaN or infinite
++parameters reach the model check and give `invalid` rows.
++
++### `batch` and `evaluate`
++
++```python
++traced = prepared.evaluate(case["parameters"], trace=True)
++print(traced["status"], traced["steps"], len(traced["metrics"]["trace"]))
++print(traced["metrics"]["trace_columns"])
++print([round(value, 6) for value in traced["metrics"]["trace"][-1]])
++records = prepared.batch([
++    {"id": "packaged", "parameters": case["parameters"]},
++    {"id": "stiff", "parameters": [16, 5.5], "trace": True},
++])["records"]
++print([(r["id"], r["status"], r["metrics"]["trace"] is not None) for r in records])
++```
++
++```text
++complete 62 62
++['t_s', 'x_m', 'v_m_s', 'held_force_n']
++[2.05, -0.101846, 0.185272, 0.085176]
++[('packaged', 'complete', False), ('stiff', 'complete', True)]
++```
++
++### `scores`
++
++```python
++lean = prepared.scores([{"id": "packaged", "parameters": case["parameters"]},
++                        {"id": "bad", "parameters": [1, 2, 3]}])
++print(lean["records"])
++```
++
++```text
++[{'id': 'packaged', 'status': 'complete', 'steps': 62, 'score': 0.26183385953817806, 'metrics': None, 'detail': None}, {'id': 'bad', 'status': 'invalid', 'steps': 0, 'score': None, 'metrics': None, 'detail': 'expected nonnegative proportional and derivative gains'}]
++```
++
++### `score_matrix`
++
++Rows can be a list of lists or a 2-D NumPy array; a row may be empty, which
++the PD model reports as `invalid`. The three returned lists are in row
++order.
++
++```python
++import math
++import numpy as np
++
++grid = np.array([[kp, kd] for kp in (0.0, 4.0, 16.0) for kd in (0.0, 2.0, 5.5)])
++scores, statuses, steps = prepared.score_matrix(grid)
++print([round(s, 6) for s in scores])
++print(set(statuses), set(steps))
++same = prepared.scores([{"id": str(i), "parameters": row.tolist()} for i, row in enumerate(grid)])
++print(all(s == r["score"] for s, r in zip(scores, same["records"])))
++mixed = prepared.score_matrix([[4, 2], [-1, 2], [math.nan, 2], [1e6, 0]])
++print(mixed[1], [math.isnan(s) for s in mixed[0]])
++print(prepared.score_matrix([[], []]))
++```
++
++```text
++[0.571764, 0.901199, 1.322546, 0.869466, 0.261834, 0.368517, 0.906258, 0.407311, 0.230627]
++{'complete'} {62}
++True
++['complete', 'invalid', 'invalid', 'invalid'] [False, True, True, True]
++([nan, nan], ['invalid', 'invalid'], [0, 0])
++```
++
++### `load_example` and `model_sha256`
++
++```python
++import hashlib
++
++print(load_example()["parameters"])
++encoded = json.dumps(case["model"], sort_keys=True, allow_nan=False, separators=(",", ":"))
++print(prepared.model_sha256 == hashlib.sha256(encoded.encode()).hexdigest())
++print(prepared.model_sha256 == prepared.batch([one])["model_sha256"])
++```
++
++```text
++[4, 2]
++True
++True
++```
++
++## 8. Application scenarios
++
++The scripts in [`examples/python/`](../examples/python/README.md) answer
++complete questions; their recorded outputs are in
++`examples/python/outputs/`. The blocks below are short versions.
++
++### PD gain study
++
++Score a gain grid in one call and inspect the trade-off between tracking
++error and effort with full records
++([`pd_gain_study.py`](../examples/python/pd_gain_study.py)).
++
++```python
++kp_values, kd_values = np.linspace(0, 20, 11), np.linspace(0, 8, 9)
++gains = np.array([[kp, kd] for kp in kp_values for kd in kd_values])
++scores, statuses, _ = prepared.score_matrix(gains)
++best = gains[int(np.argmin(scores))]
++print("best gains", best.tolist(), "score", round(min(scores), 6))
++records = prepared.batch([{"id": str(i), "parameters": g.tolist()} for i, g in enumerate(gains)])["records"]
++for i in np.argsort(scores)[:3]:
++    m = records[i]["metrics"]
++    print(gains[i].tolist(), round(m["integrated_error"], 4), round(m["integrated_force_squared"], 4))
++```
++
++```text
++best gains [14.0, 5.0] score 0.230648
++[14.0, 5.0] 0.4555 8.4195
++[18.0, 6.0] 0.4538 9.4014
++[20.0, 7.0] 0.4546 9.0815
++```
++
++### Held actuation schedules
++
++Compare force schedules for the same switch times
++([`held_actuation_and_convergence.py`](../examples/python/held_actuation_and_convergence.py)).
++
++```python
++schedule_model = case["model"] | {
++    "dt_s": 0.01, "horizon_s": 4.0,
++    "control": {"kind": "held", "switches_s": [0.5, 1.0, 2.0, 3.0]},
++}
++schedules = np.array([[-3.0, -1.0, 0.0, 0.0, 0.0], [-3.0, 3.0, -1.0, 0.5, 0.0], [-1.0, -0.5, 0.0, 0.25, 0.0]])
++scores, statuses, steps = Prepared(schedule_model).score_matrix(schedules)
++print([round(s, 6) for s in scores], statuses, steps)
++```
++
++```text
++[1.104367, 0.315276, 0.407857] ['complete', 'complete', 'complete'] [402, 402, 402]
++```
++
++### Step-size convergence and refined replay
++
++RK4 converges with fourth order; the terminal state approaches the exact
++segment-wise solution. A study should confirm that its conclusions hold at
++a smaller step.
++
++```python
++from scipy.linalg import expm
++
++def exact_terminal(model, forces):
++    state = np.array([model["initial_x_m"], model["initial_v_m_s"], 1.0])
++    times = [0.0, *model["control"]["switches_s"], model["horizon_s"]]
++    m, k, c = model["mass_kg"], model["spring_n_per_m"], model["damping_ns_per_m"]
++    for lo, hi, force in zip(times[:-1], times[1:], forces):
++        state = expm(np.array([[0, 1, 0], [-k / m, -c / m, force / m], [0, 0, 0]]) * (hi - lo)) @ state
++    return state[:2]
++
++reference = exact_terminal(schedule_model, schedules[0])
++for dt in (0.04, 0.02, 0.01):
++    m = Prepared(schedule_model | {"dt_s": dt}).evaluate(schedules[0].tolist())["metrics"]
++    error = max(abs(reference - [m["terminal_position_m"], m["terminal_velocity_m_s"]]))
++    print(dt, f"{error:.2e}")
++```
++
++```text
++0.04 7.19e-08
++0.02 4.49e-09
++0.01 2.78e-10
++```
++
++### Scenario robustness
++
++Evaluate controllers over sampled plants; prepare each scenario once
++([`scenario_robustness.py`](../examples/python/scenario_robustness.py)).
++
++```python
++import random
++
++rng = random.Random(3)
++scenarios = [case["model"] | {"mass_kg": rng.uniform(0.8, 1.2), "damping_ns_per_m": rng.uniform(0.25, 0.65)}
++             for _ in range(12)]
++controllers = [[4.0, 2.0], [16.0, 5.5]]
++table = np.array([Prepared(s).score_matrix(controllers)[0] for s in scenarios])
++print("mean", table.mean(axis=0).round(6).tolist(), "worst", table.max(axis=0).round(6).tolist())
++```
++
++```text
++mean [0.266021, 0.23358] worst [0.300985, 0.256365]
++```
++
++### Feasibility near the position limit
++
++```python
++gains = np.array([[kp, kd] for kp in (2.0, 8.0, 30.0) for kd in (0.0, 1.0, 3.0)])
++_, statuses, steps = Prepared(near_limit).score_matrix(gains)
++for g, s, n in zip(gains.tolist(), statuses, steps):
++    print(g, s, n)
++```
++
++```text
++[2.0, 0.0] infeasible 49
++[2.0, 1.0] complete 62
++[2.0, 3.0] complete 62
++[8.0, 0.0] infeasible 41
++[8.0, 1.0] infeasible 43
++[8.0, 3.0] complete 62
++[30.0, 0.0] infeasible 41
++[30.0, 1.0] infeasible 41
++[30.0, 3.0] infeasible 43
++```
++
++### Sensitivity to plant parameters
++
++Central differences over perturbed models
++([`parameter_sensitivity.py`](../examples/python/parameter_sensitivity.py)).
++
++```python
++base_model = case["model"] | {"dt_s": 0.01}
++nominal_score = Prepared(base_model).evaluate([8.0, 3.0])["score"]
++for name in ("mass_kg", "damping_ns_per_m", "force_limit_n"):
++    value = base_model[name]
++    up = Prepared(base_model | {name: value * 1.01}).evaluate([8.0, 3.0])["score"]
++    down = Prepared(base_model | {name: value * 0.99}).evaluate([8.0, 3.0])["score"]
++    print(name, round((up - down) / (0.02 * nominal_score), 4))
++```
++
++```text
++mass_kg 0.6475
++damping_ns_per_m 0.006
++force_limit_n -0.3527
++```
++
++### Traces for replay
++
++Request traces only for selected candidates. A traced rollout can have at
++most 10,000 steps; shorten the horizon or enlarge `dt_s` for inspection.
++
++```python
++replay = Prepared(near_limit | {"horizon_s": 1.0, "dt_s": 0.1}).evaluate([8.0, 3.0], trace=True)
++for t, x, v, force in replay["metrics"]["trace"][:4]:
++    print(round(t, 3), round(x, 5), round(v, 5), round(force, 5))
++```
++
++```text
++0.1 0.01479 0.29359 3.0
++0.2 0.05824 0.57279 3.0
++0.3 0.1288 0.83544 3.0
++0.4 0.22471 1.0796 3.0
++```
++
++## 9. Optimization
++
++Return a penalty for every non-complete row so that optimizers move away
++from infeasible and invalid regions. Score populations in one call where
++the optimizer allows it.
++
++### SciPy, whole populations
++
++`differential_evolution(vectorized=True)` passes an array of shape
++`(dim, population)`; one `score_matrix` call scores it
++([`scipy_de_tuning.py`](../examples/python/scipy_de_tuning.py)).
++
++```python
++from scipy.optimize import differential_evolution
++
++near_prepared = Prepared(near_limit)
++
++def population_objective(x):
++    scores, statuses, _ = near_prepared.score_matrix(x.T)
++    return np.where(np.array(statuses) == "complete", scores, 10.0)
++
++result = differential_evolution(population_objective, [(0, 100), (0, 30)], seed=1, popsize=8,
++                                maxiter=20, vectorized=True, updating="deferred", polish=False)
++print(np.round(result.x, 3).tolist(), round(result.fun, 6))
++```
++
++```text
++[43.597, 11.369] 1.012918
++```
++
++### SciPy, one candidate per call
++
++```python
++from scipy.optimize import minimize
++
++def objective(x):
++    scores, statuses, _ = prepared.score_matrix([x.tolist()])
++    return scores[0] if statuses[0] == "complete" else 1e3
++
++local = minimize(objective, [4.0, 2.0], method="Nelder-Mead", bounds=[(0, 40), (0, 20)])
++print(np.round(local.x, 3).tolist(), round(local.fun, 6))
++```
++
++```text
++[15.55, 5.435] 0.230608
++```
++
++### fcmaes ask/tell
++
++fcmaes optimizers with an ask/tell interface hand out a whole population;
++score it with one `score_matrix` call
++([`fcmaes_cmaes_held_schedule.py`](../examples/python/fcmaes_cmaes_held_schedule.py)).
++
++```python
++from loguru import logger
++from scipy.optimize import Bounds
++from fcmaes import cmaes
++
++logger.remove()
++generator = np.random.default_rng(4)
++es = cmaes.Cmaes(bounds=Bounds([-3.0] * 5, [3.0] * 5), x0=np.zeros(5), input_sigma=1.0, popsize=16,
++                 rg=generator, randn=lambda *shape: generator.standard_normal(shape))
++held_prepared = Prepared(schedule_model)
++for generation in range(40):
++    xs = es.ask()
++    scores, statuses, _ = held_prepared.score_matrix(xs)
++    if es.tell(np.where(np.array(statuses) == "complete", scores, 10.0)):
++        break
++print(round(float(min(scores)), 6), np.round(xs[int(np.argmin(scores))], 3).tolist())
++```
++
++```text
++0.1447 [-3.0, 3.0, 0.062, 0.289, -0.051]
++```
++
++### fcmaes standard minimizers
++
++`bitecpp.minimize`, `cmaescpp.minimize` and `de.minimize` call a scalar
++objective ([`fcmaes_bite_robust_pd.py`](../examples/python/fcmaes_bite_robust_pd.py)).
++
++```python
++from fcmaes import bitecpp
++
++robust_models = [Prepared(s | {"target_m": 1.8, "initial_x_m": 0.0, "initial_v_m_s": 0.0})
++                 for s in scenarios[:4]]
++
++def robust(x):
++    total = 0.0
++    for p in robust_models:
++        scores, statuses, _ = p.score_matrix([x.tolist()])
++        total += scores[0] if statuses[0] == "complete" else 5.0
++    return total / len(robust_models)
++
++found = bitecpp.minimize(robust, Bounds([0.0, 0.0], [40.0, 4.0]), x0=[5.0, 2.0],
++                         max_evaluations=400, rg=np.random.default_rng(2))
++print(np.round(found.x, 3).tolist(), round(found.fun, 6))
++```
++
++```text
++[14.871, 4.0] 0.995672
++```
++
++After any search, replay the winner with full metrics, at a smaller step
++and on held-out scenarios before drawing conclusions.
++
++## 10. Campaigns
++
++`campaign.run(database, scenarios, candidates, *, workers=1, chunk_size=16,
++**budget)` evaluates every candidate on every scenario and stores results in
++SQLite. `scenarios` is a list of `{"id", "model"}` and `candidates` a list
++of candidate objects; IDs must be unique within each list, and `chunk_size`
++is 1 to 256. It returns one row per scenario and candidate, scenario-major,
++with `scenario`, `key`, `build_sha256`, `model_sha256` and `record`.
++
++The cache key is the SHA-256 of the extension build, the scenario ID, the
++model, the candidate and the budget without `cancel_file`. Complete,
++invalid and infeasible records are reused; canceled and time-limited
++attempts stay in the `attempts` journal and are retried on the next run.
++
++```python
++with tempfile.TemporaryDirectory() as folder:
++    database = Path(folder) / "campaign.sqlite"
++    study = [{"id": "nominal", "model": case["model"]}, {"id": "heavy", "model": case["model"] | {"mass_kg": 1.2}}]
++    trials = [{"id": "packaged", "parameters": [4, 2]}, {"id": "stiff", "parameters": [16, 5.5]}]
++    first = campaign.run(database, study, trials, workers=2)
++    again = campaign.run(database, study, trials)
++    print(first == again, [(r["scenario"], r["record"]["id"], round(r["record"]["score"], 6)) for r in first])
++    flag = Path(folder) / "stop"
++    flag.touch()
++    more = trials + [{"id": "soft", "parameters": [2, 1]}]
++    interrupted = campaign.run(database, study, more, cancel_file=str(flag))
++    print([r["record"]["status"] for r in interrupted])
++    flag.unlink()
++    resumed = campaign.run(database, study, more)
++    print([r["record"]["status"] for r in resumed])
++```
++
++```text
++True [('nominal', 'packaged', 0.261834), ('nominal', 'stiff', 0.230627), ('heavy', 'packaged', 0.303248), ('heavy', 'stiff', 0.256491)]
++['complete', 'complete', 'cancelled', 'complete', 'complete', 'cancelled']
++['complete', 'complete', 'complete', 'complete', 'complete', 'complete']
++```
++
++The manifest runner uses the same function:
++
++```sh
++python validation/run_campaign.py robotics_control_craft models/campaign.json campaign.sqlite > first.json
++python validation/run_campaign.py robotics_control_craft models/campaign.json campaign.sqlite > replay.json
++cmp first.json replay.json
++```
++
++## 11. Rust API
++
++The crate `robotics_control_craft` exposes:
++
++| Item | Signature | Notes |
++| --- | --- | --- |
++| `Prepared::new` | `fn new(model: &str) -> Result<Prepared, String>` | Model JSON text; hashes the exact bytes |
++| `Prepared::evaluate_json` | `fn evaluate_json(&self, candidates: &str, budget: &str) -> Result<String, String>` | Full result JSON |
++| `Prepared::scores_json` | `fn scores_json(&self, candidates: &str, budget: &str) -> Result<String, String>` | Lean result JSON |
++| `Prepared::score_matrix` | `fn score_matrix(&self, rows: usize, parameters: &[f64], budget: &str) -> Result<Vec<MatrixScore>, String>` | Row-major parameters |
++| `Prepared::model_sha256` | `fn model_sha256(&self) -> &str` | Hex hash of the model bytes |
++| `MatrixScore` | `struct { status: &'static str, steps: u64, score: Option<f64> }` | `score` is `Some` only for `"complete"` |
++| `run` | `fn run(text: &str) -> Result<serde_json::Value, String>` | Whole request, as the CLI uses it |
++| `capabilities` | `fn capabilities() -> serde_json::Value` | The `describe` document |
++
++A `Prepared` is `Sync`; share it between threads by reference. The
++example [`examples/matrix.rs`](../examples/matrix.rs) runs a gain grid:
++
++```rust
++use robotics_control_craft::Prepared;
++
++let prepared = Prepared::new(&model_json)?;
++let gains: Vec<[f64; 2]> = (0..=20)
++    .flat_map(|p| (0..=16).map(move |d| [f64::from(p), f64::from(d) * 0.5]))
++    .collect();
++let parameters: Vec<f64> = gains.iter().flatten().copied().collect();
++let rows = prepared.score_matrix(gains.len(), &parameters, r#"{"workers":2}"#)?;
++```
++
++```sh
++cargo run --release --locked --example matrix -- models/example.json
++```
++
++```text
++357 rows, 357 complete; best kp=16 kd=5.5 score=0.23062720947966966 steps=62
++model sha256 f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7
++```
++
++`examples/sweep.rs` scales the packaged gains and prints the best full
++record with `evaluate_json`:
++
++```sh
++target/release/examples/sweep models/example.json
++```
++
++```text
++{"detail":null,"id":"4","metrics":{"integrated_error":0.4846115392329917,"integrated_force_squared":4.683341872923213,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.05998901457910427,"terminal_velocity_m_s":0.14412306659006174,"trace":null,"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.24675504237200888,"status":"complete","steps":62}
++```
++
++## 12. Command line
++
++```text
++robotics-control-craft describe
++robotics-control-craft run FILE
++robotics-control-craft run -        (read the request from standard input)
++```
++
++`describe` prints the capability document:
++
++```sh
++target/release/robotics-control-craft describe
++```
++
++```text
++{"batch":true,"models":["bounded_mass_spring_damper","piecewise_constant_actuation","sampled_pd","scenario_replay"],"schema":"robotics-control-craft.capabilities/0.1","version":"0.3.0","worker_limit":64}
++```
++
++`run` evaluates one request (at most 16 MiB) and prints the result. The
++exit status is 0 when every record is complete, 2 when the request was valid
++but at least one record is not complete, and 1 when the request is rejected;
++a rejection prints `{"detail": ..., "status": "rejected"}` on standard
++error. The CLI prints maps with sorted keys.
++
++```sh
++target/release/robotics-control-craft run - <<'EOF'
++{"schema": "robotics-control-craft.request/0.1",
++ "model": {"mass_kg": 1, "spring_n_per_m": 1, "damping_ns_per_m": 0.4, "initial_x_m": 1,
++           "initial_v_m_s": 0.2, "target_m": 0, "dt_s": 0.04, "horizon_s": 2.05,
++           "force_limit_n": 3, "position_limit_m": 2, "control": {"kind": "pd", "interval_s": 0.1}},
++ "candidates": [{"id": "packaged", "parameters": [4, 2]},
++                {"id": "negative", "parameters": [-1, 2]}],
++ "budget": {"workers": 1}}
++EOF
++echo "exit $?"
++```
++
++```text
++{"model_sha256":"e3ceef7647bb96de775ac0d7ddfef9f4680a090f0e48461a158d66a3d23bd06e","records":[{"detail":null,"id":"packaged","metrics":{"integrated_error":0.49996410758532783,"integrated_force_squared":4.143845804875482,"max_abs_force_n":3.0,"max_abs_position_m":1.004751648768,"terminal_position_m":-0.10184556515463423,"terminal_velocity_m_s":0.18527180201551174,"trace":null,"trace_columns":["t_s","x_m","v_m_s","held_force_n"]},"score":0.26183385953817806,"status":"complete","steps":62},{"detail":"expected nonnegative proportional and derivative gains","id":"negative","metrics":null,"score":null,"status":"invalid","steps":0}],"schema":"robotics-control-craft.result/0.1","version":"0.3.0"}
++exit 2
++```
++
++The hash differs from the Python one for the same model because the bytes
++differ: the CLI hashes the model text exactly as written in the request.
++
++A rejected request and the usage message:
++
++```sh
++target/release/robotics-control-craft run - <<'EOF'
++{"schema": "robotics-control-craft.request/9.9", "model": {}, "candidates": []}
++EOF
++echo "exit $?"
++target/release/robotics-control-craft
++echo "exit $?"
++```
++
++```text
++{"detail":"unsupported request schema","status":"rejected"}
++exit 1
++{"detail":"usage: robotics-control-craft describe | run FILE (use - for stdin)","status":"rejected"}
++exit 1
++```
++
++The benchmark binary prints seconds per prepared call after warm-up for one
++of the workloads `one`, `serial`, `parallel`, `trace`, `invalid`, `domain`
++and `domain2`. `CRAFT_SCORES=1` selects the lean API and `CRAFT_MATRIX=1`
++the matrix API. Times depend on the host; these are from the release host:
++
++```sh
++target/release/examples/performance models/example.json serial
++CRAFT_MATRIX=1 target/release/examples/performance models/example.json serial
++```
++
++```text
++0.0000929835
++0.000029997
++```
++
++`validation/performance_pair.py BEFORE AFTER models/example.json WORKLOAD`
++checks that two benchmark binaries give the same records and times them
++alternately; `--before-scores`, `--after-scores`, `--before-matrix` and
++`--after-matrix` select the API per side.
++
++## 13. Reproducibility and provenance
++
++- **Model identity.** `model_sha256` is the SHA-256 of the exact model bytes
++  prepared. The Python wrapper encodes models with sorted keys and compact
++  separators, so equal dictionaries give equal hashes; the CLI hashes the
++  request's model text as written.
++- **Versions.** Results carry `schema` (`robotics-control-craft.result/0.1`)
++  and `version` (`0.3.0`). The schema tag changes only when the record shape
++  changes.
++- **Determinism.** With a fixed model, candidate and `max_steps`, results are
++  identical across calls, worker counts, batch compositions and API
++  (`batch`, `scores`, `score_matrix`). The lockstep lane kernels (AVX-512F,
++  AVX2 and baseline builds) perform the same IEEE operations as the scalar
++  kernel without fused multiply-add, so the choice of kernel on a host does
++  not change any bit of the result; the unit tests compare the kernels bit
++  for bit. Version 0.3.0 reproduces 0.2.0 records byte for byte on every
++  benchmark workload.
++- **Timing-dependent settings.** `wall_ms` and `cancel_file` can change which
++  candidates finish and at which step.
++- **Campaigns.** Campaign keys include the SHA-256 of the installed extension,
++  so a new build re-evaluates instead of reusing results across builds.
++- **Validation.** `validation/validate.py BINARY` checks terminal states
++  against a matrix-exponential oracle for under-, critically and overdamped
++  plants, refinement order, switch landing, a held-out scenario comparison
++  and a refined replay of an error/effort archive. It writes
++  `evidence/validation.json` and regenerates `models/example.json`.
++
++```python
++again = Prepared(json.loads(json.dumps(case["model"])))
++print(again.model_sha256 == prepared.model_sha256)
++print(prepared.score_matrix(grid) == prepared.score_matrix(grid, workers=3))
++```
++
++```text
++True
++True
++```
++
++## 14. Performance tips
++
++Measured numbers and their evidence are in the
++[architecture guide](architecture.md#performance).
++
++- **Prefer `score_matrix` in optimization loops.** It skips JSON in both
++  directions. Through Python it costs about 0.8 µs per row in batches of
++  96 short rollouts, against 3.5 µs for `scores` and 4.4 µs for `batch`; a
++  single row costs about 5 µs against 11–14 µs.
++- **Send populations, not single candidates.** Untraced rows are integrated
++  in lockstep groups of 16 (hosts with AVX-512F) or 8. Batches of at least
++  one group use the fast kernel; a single row uses the scalar kernel.
++- **Avoid `wall_ms` and `cancel_file` in tight loops.** They force the scalar
++  kernel and add a per-step check. On the release host 48 rollouts of 4,000
++  steps took 0.63 ms without them, 13 ms with `wall_ms` and 97 ms with a
++  `cancel_file`.
++- **Choose workers by work per call.** Thread start-up costs tens of
++  microseconds. Keep `workers=1` for cheap rollouts; use two workers or more
++  only for calls with hundreds of thousands of steps and at least two groups
++  per worker. More workers than CPUs do not help.
++- **Trace only for replay.** Trace output is dominated by number formatting.
++- **Prepare once.** `Prepared` validates and hashes the model; reuse it for
++  all candidates of one scenario. The first preparation in a process takes
++  about 0.15 ms, later ones a few microseconds.
++
++```python
++from time import perf_counter
++
++population = np.column_stack([np.linspace(0, 20, 64), np.linspace(0, 8, 64)])
++start = perf_counter()
++for _ in range(20):
++    prepared.score_matrix(population)
++matrix_seconds = perf_counter() - start
++candidates = [{"id": str(i), "parameters": row.tolist()} for i, row in enumerate(population)]
++start = perf_counter()
++for _ in range(20):
++    prepared.batch(candidates)
++batch_seconds = perf_counter() - start
++print("score_matrix is faster than batch:", matrix_seconds < batch_seconds)
++```
++
++```text
++score_matrix is faster than batch: True
++```
++
++## 15. Troubleshooting
++
++| Symptom | Cause and fix |
++| --- | --- |
++| `ValueError: invalid oscillator state, coefficients, limits or time grid` | A model field is out of range or the initial or target position exceeds `position_limit_m`; see section 3 |
++| `ValueError: time step outside declared stability envelope` | Reduce `dt_s` until `dt_s × (sqrt(k/m) + c/m) ≤ 0.5` |
++| Every row is `invalid` with a PD message | Parameters must be exactly `[kp, kd]`, both from 0 to 100,000 |
++| Every row is `invalid` with a held message | Supply `len(switches_s) + 1` forces within `force_limit_n` |
++| Traced rows are `invalid` with 10,001 steps | The rollout needs more than 10,000 steps; trace a shorter horizon or a larger step |
++| Rows are `work_limit` | Raise `max_steps`; a rollout needs about `horizon_s / dt_s` steps plus one per control boundary |
++| `ValueError: Out of range float values are not JSON compliant` | NaN or infinity in `batch`, `scores` or `evaluate`; use finite numbers, or `score_matrix`, which reports such rows as `invalid` |
++| `ValueError: scores mode accepts untraced candidates only` | Remove `trace` from candidates passed to `scores`, or use `batch` |
++| `ValueError: parameter rows must all have the same length` | `score_matrix` needs equal-length rows; pad or split by control kind |
++| Optimization is slow | Batch populations through `score_matrix` and remove `wall_ms` and `cancel_file` from the loop (section 14) |
++| Results differ between runs | Only `wall_ms` and `cancel_file` make results timing-dependent; also check that the model dictionaries are equal (`model_sha256`) |
++| `ImportError` for `_native` | The wheel targets Linux x86-64 and CPython 3.10+; build from the source distribution on other platforms |
++| A campaign re-evaluates everything | The extension build changed (new wheel), or the model, candidates or budget changed; all are part of the cache key |
+diff --git a/evidence/performance-0.3.0/breakdown.json b/evidence/performance-0.3.0/breakdown.json
+index ad7a9a0..6828a00 100644
+--- a/evidence/performance-0.3.0/breakdown.json
++++ b/evidence/performance-0.3.0/breakdown.json
+@@ -1,201 +1,810 @@
+ {
+-  "domain": {
+-    "full": {
+-      "decode_us": 10.055,
+-      "encode_us": 14.292,
+-      "evaluate_us": 591.22,
+-      "iterations": 361,
+-      "total_us": 615.42
+-    },
+-    "lean": {
+-      "decode_us": 10.360000000000001,
+-      "encode_us": 3.267,
+-      "evaluate_us": 581.5319999999999,
+-      "iterations": 386,
+-      "total_us": 596.265
+-    },
+-    "matrix": {
+-      "iterations": 412,
+-      "total_us": 645.894
+-    },
+-    "rows": 48,
+-    "workers": 1
+-  },
+-  "domain2": {
+-    "full": {
+-      "decode_us": 11.658,
+-      "encode_us": 13.635000000000002,
+-      "evaluate_us": 597.828,
+-      "iterations": 385,
+-      "total_us": 624.35
+-    },
+-    "lean": {
+-      "decode_us": 12.347000000000001,
+-      "encode_us": 3.375,
+-      "evaluate_us": 576.422,
+-      "iterations": 418,
+-      "total_us": 593.4449999999999
+-    },
+-    "matrix": {
+-      "iterations": 428,
+-      "total_us": 584.484
+-    },
+-    "rows": 48,
+-    "workers": 1
+-  },
+-  "invalid": {
+-    "full": {
+-      "decode_us": 867.241,
+-      "encode_us": 52.404999999999994,
+-      "evaluate_us": 76.59599999999999,
+-      "iterations": 214,
+-      "total_us": 999.6510000000001
+-    },
+-    "lean": {
+-      "decode_us": 926.511,
+-      "encode_us": 55.358000000000004,
+-      "evaluate_us": 82.47999999999999,
+-      "iterations": 236,
+-      "total_us": 1072.653
+-    },
+-    "matrix": {
+-      "iterations": 7232,
+-      "total_us": 26.750999999999998
+-    },
+-    "rows": 1024,
+-    "workers": 1
+-  },
+-  "lane_kernel": "avx512f, 16 lanes",
+-  "lane_width": 16,
+-  "one": {
+-    "full": {
+-      "decode_us": 0.267,
+-      "encode_us": 0.384,
+-      "evaluate_us": 2.1189999999999998,
+-      "iterations": 15383,
+-      "total_us": 2.786
+-    },
+-    "lean": {
+-      "decode_us": 0.255,
+-      "encode_us": 0.14700000000000002,
+-      "evaluate_us": 2.115,
+-      "iterations": 20001,
+-      "total_us": 2.532
+-    },
+-    "matrix": {
+-      "iterations": 20001,
+-      "total_us": 2.093
++  "host": "2 vCPUs, Intel(R) Xeon(R) Processor @ 2.10GHz (KVM), Rust 1.97.0, lane kernel avx512f with 16 lanes",
++  "method": "cargo test --release --locked --lib breakdown -- --ignored --nocapture, three runs; each cell is the median over runs of per-run medians (about 0.25 s of calls per cell)",
++  "median": {
++    "domain": {
++      "full": {
++        "decode_us": 10.501,
++        "encode_us": 15.06,
++        "evaluate_us": 603.682,
++        "iterations": 361,
++        "total_us": 630.25
++      },
++      "lean": {
++        "decode_us": 11.215,
++        "encode_us": 3.511,
++        "evaluate_us": 616.841,
++        "iterations": 386,
++        "total_us": 634.226
++      },
++      "matrix": {
++        "iterations": 412,
++        "total_us": 645.894
++      },
++      "rows": 48,
++      "workers": 1
+     },
+-    "rows": 1,
+-    "workers": 1
+-  },
+-  "parallel": {
+-    "full": {
+-      "decode_us": 26.328,
+-      "encode_us": 32.039,
+-      "evaluate_us": 149.673,
+-      "iterations": 417,
+-      "total_us": 216.25
++    "domain2": {
++      "full": {
++        "decode_us": 11.918,
++        "encode_us": 13.977,
++        "evaluate_us": 611.2869999999999,
++        "iterations": 385,
++        "total_us": 638.8910000000001
++      },
++      "lean": {
++        "decode_us": 12.744,
++        "encode_us": 3.421,
++        "evaluate_us": 586.013,
++        "iterations": 418,
++        "total_us": 603.253
++      },
++      "matrix": {
++        "iterations": 428,
++        "total_us": 600.8679999999999
++      },
++      "rows": 48,
++      "workers": 1
+     },
+-    "lean": {
+-      "decode_us": 22.402,
+-      "encode_us": 9.268,
+-      "evaluate_us": 113.08,
+-      "iterations": 1196,
+-      "total_us": 147.471
++    "invalid": {
++      "full": {
++        "decode_us": 924.4989999999999,
++        "encode_us": 55.738,
++        "evaluate_us": 85.01,
++        "iterations": 214,
++        "total_us": 1070.517
++      },
++      "lean": {
++        "decode_us": 954.2520000000001,
++        "encode_us": 58.132,
++        "evaluate_us": 87.298,
++        "iterations": 236,
++        "total_us": 1101.266
++      },
++      "matrix": {
++        "iterations": 7232,
++        "total_us": 26.750999999999998
++      },
++      "rows": 1024,
++      "workers": 1
+     },
+-    "matrix": {
+-      "iterations": 1713,
+-      "total_us": 126.365
++    "lane_kernel": "avx512f, 16 lanes",
++    "lane_width": 16,
++    "one": {
++      "full": {
++        "decode_us": 0.268,
++        "encode_us": 0.384,
++        "evaluate_us": 2.12,
++        "iterations": 15383,
++        "total_us": 2.786
++      },
++      "lean": {
++        "decode_us": 0.255,
++        "encode_us": 0.14600000000000002,
++        "evaluate_us": 2.115,
++        "iterations": 20001,
++        "total_us": 2.531
++      },
++      "matrix": {
++        "iterations": 20001,
++        "total_us": 2.093
++      },
++      "rows": 1,
++      "workers": 1
+     },
+-    "rows": 96,
+-    "workers": 4
+-  },
+-  "serial": {
+-    "full": {
+-      "decode_us": 15.761000000000001,
+-      "encode_us": 25.738999999999997,
+-      "evaluate_us": 35.528000000000006,
+-      "iterations": 2083,
+-      "total_us": 77.613
++    "parallel": {
++      "full": {
++        "decode_us": 23.264999999999997,
++        "encode_us": 31.758000000000003,
++        "evaluate_us": 131.898,
++        "iterations": 417,
++        "total_us": 189.21
++      },
++      "lean": {
++        "decode_us": 22.402,
++        "encode_us": 9.268,
++        "evaluate_us": 115.821,
++        "iterations": 1196,
++        "total_us": 149.755
++      },
++      "matrix": {
++        "iterations": 1713,
++        "total_us": 119.183
++      },
++      "rows": 96,
++      "workers": 4
+     },
+-    "lean": {
+-      "decode_us": 15.139000000000001,
+-      "encode_us": 5.149,
+-      "evaluate_us": 30.939000000000004,
+-      "iterations": 3515,
+-      "total_us": 52.321000000000005
++    "serial": {
++      "full": {
++        "decode_us": 15.357,
++        "encode_us": 25.25,
++        "evaluate_us": 34.56,
++        "iterations": 2083,
++        "total_us": 75.19
++      },
++      "lean": {
++        "decode_us": 15.384,
++        "encode_us": 5.2059999999999995,
++        "evaluate_us": 32.072,
++        "iterations": 3515,
++        "total_us": 53.516
++      },
++      "matrix": {
++        "iterations": 7410,
++        "total_us": 28.985
++      },
++      "rows": 96,
++      "workers": 1
+     },
+-    "matrix": {
+-      "iterations": 7410,
+-      "total_us": 35.605999999999995
++    "trace": {
++      "full": {
++        "decode_us": 3.1310000000000002,
++        "encode_us": 82.235,
++        "evaluate_us": 28.680999999999997,
++        "iterations": 1803,
++        "total_us": 117.812
++      },
++      "rows": 12,
++      "workers": 1
+     },
+-    "rows": 96,
+-    "workers": 1
++    "worker_scaling": {
++      "domain": {
++        "full_workers_1": {
++          "iterations": 376,
++          "total_us": 657.7589999999999
++        },
++        "full_workers_2": {
++          "iterations": 323,
++          "total_us": 478.056
++        },
++        "full_workers_4": {
++          "iterations": 467,
++          "total_us": 523.895
++        },
++        "matrix_workers_1": {
++          "iterations": 398,
++          "total_us": 629.291
++        },
++        "matrix_workers_2": {
++          "iterations": 615,
++          "total_us": 448.488
++        },
++        "matrix_workers_4": {
++          "iterations": 545,
++          "total_us": 460.429
++        }
++      },
++      "serial": {
++        "full_workers_1": {
++          "iterations": 2402,
++          "total_us": 82.50999999999999
++        },
++        "full_workers_2": {
++          "iterations": 693,
++          "total_us": 123.04500000000002
++        },
++        "full_workers_4": {
++          "iterations": 1336,
++          "total_us": 189.643
++        },
++        "matrix_workers_1": {
++          "iterations": 5363,
++          "total_us": 29.128
++        },
++        "matrix_workers_2": {
++          "iterations": 2495,
++          "total_us": 66.333
++        },
++        "matrix_workers_4": {
++          "iterations": 2502,
++          "total_us": 111.03999999999999
++        }
++      }
++    }
+   },
+-  "trace": {
+-    "full": {
+-      "decode_us": 2.035,
+-      "encode_us": 61.034,
+-      "evaluate_us": 25.789,
+-      "iterations": 1803,
+-      "total_us": 89.01
++  "runs": [
++    {
++      "domain": {
++        "full": {
++          "decode_us": 10.055,
++          "encode_us": 14.292,
++          "evaluate_us": 591.22,
++          "iterations": 361,
++          "total_us": 615.42
++        },
++        "lean": {
++          "decode_us": 10.360000000000001,
++          "encode_us": 3.267,
++          "evaluate_us": 581.5319999999999,
++          "iterations": 386,
++          "total_us": 596.265
++        },
++        "matrix": {
++          "iterations": 412,
++          "total_us": 645.894
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "domain2": {
++        "full": {
++          "decode_us": 11.658,
++          "encode_us": 13.635000000000002,
++          "evaluate_us": 597.828,
++          "iterations": 385,
++          "total_us": 624.35
++        },
++        "lean": {
++          "decode_us": 12.347000000000001,
++          "encode_us": 3.375,
++          "evaluate_us": 576.422,
++          "iterations": 418,
++          "total_us": 593.4449999999999
++        },
++        "matrix": {
++          "iterations": 428,
++          "total_us": 584.484
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "invalid": {
++        "full": {
++          "decode_us": 867.241,
++          "encode_us": 52.404999999999994,
++          "evaluate_us": 76.59599999999999,
++          "iterations": 214,
++          "total_us": 999.6510000000001
++        },
++        "lean": {
++          "decode_us": 926.511,
++          "encode_us": 55.358000000000004,
++          "evaluate_us": 82.47999999999999,
++          "iterations": 236,
++          "total_us": 1072.653
++        },
++        "matrix": {
++          "iterations": 7232,
++          "total_us": 26.750999999999998
++        },
++        "rows": 1024,
++        "workers": 1
++      },
++      "lane_kernel": "avx512f, 16 lanes",
++      "lane_width": 16,
++      "one": {
++        "full": {
++          "decode_us": 0.267,
++          "encode_us": 0.384,
++          "evaluate_us": 2.1189999999999998,
++          "iterations": 15383,
++          "total_us": 2.786
++        },
++        "lean": {
++          "decode_us": 0.255,
++          "encode_us": 0.14700000000000002,
++          "evaluate_us": 2.115,
++          "iterations": 20001,
++          "total_us": 2.532
++        },
++        "matrix": {
++          "iterations": 20001,
++          "total_us": 2.093
++        },
++        "rows": 1,
++        "workers": 1
++      },
++      "parallel": {
++        "full": {
++          "decode_us": 26.328,
++          "encode_us": 32.039,
++          "evaluate_us": 149.673,
++          "iterations": 417,
++          "total_us": 216.25
++        },
++        "lean": {
++          "decode_us": 22.402,
++          "encode_us": 9.268,
++          "evaluate_us": 113.08,
++          "iterations": 1196,
++          "total_us": 147.471
++        },
++        "matrix": {
++          "iterations": 1713,
++          "total_us": 126.365
++        },
++        "rows": 96,
++        "workers": 4
++      },
++      "serial": {
++        "full": {
++          "decode_us": 15.761000000000001,
++          "encode_us": 25.738999999999997,
++          "evaluate_us": 35.528000000000006,
++          "iterations": 2083,
++          "total_us": 77.613
++        },
++        "lean": {
++          "decode_us": 15.139000000000001,
++          "encode_us": 5.149,
++          "evaluate_us": 30.939000000000004,
++          "iterations": 3515,
++          "total_us": 52.321000000000005
++        },
++        "matrix": {
++          "iterations": 7410,
++          "total_us": 35.605999999999995
++        },
++        "rows": 96,
++        "workers": 1
++      },
++      "trace": {
++        "full": {
++          "decode_us": 2.035,
++          "encode_us": 61.034,
++          "evaluate_us": 25.789,
++          "iterations": 1803,
++          "total_us": 89.01
++        },
++        "rows": 12,
++        "workers": 1
++      },
++      "worker_scaling": {
++        "domain": {
++          "full_workers_1": {
++            "iterations": 376,
++            "total_us": 657.7589999999999
++          },
++          "full_workers_2": {
++            "iterations": 323,
++            "total_us": 496.48
++          },
++          "full_workers_4": {
++            "iterations": 467,
++            "total_us": 492.32599999999996
++          },
++          "matrix_workers_1": {
++            "iterations": 398,
++            "total_us": 629.291
++          },
++          "matrix_workers_2": {
++            "iterations": 615,
++            "total_us": 438.315
++          },
++          "matrix_workers_4": {
++            "iterations": 545,
++            "total_us": 463.966
++          }
++        },
++        "serial": {
++          "full_workers_1": {
++            "iterations": 2402,
++            "total_us": 77.189
++          },
++          "full_workers_2": {
++            "iterations": 693,
++            "total_us": 113.976
++          },
++          "full_workers_4": {
++            "iterations": 1336,
++            "total_us": 173.52
++          },
++          "matrix_workers_1": {
++            "iterations": 5363,
++            "total_us": 28.793
++          },
++          "matrix_workers_2": {
++            "iterations": 2495,
++            "total_us": 57.416000000000004
++          },
++          "matrix_workers_4": {
++            "iterations": 2502,
++            "total_us": 105.832
++          }
++        }
++      }
+     },
+-    "rows": 12,
+-    "workers": 1
+-  },
+-  "worker_scaling": {
+-    "domain": {
+-      "full_workers_1": {
+-        "iterations": 376,
+-        "total_us": 657.7589999999999
++    {
++      "domain": {
++        "full": {
++          "decode_us": 10.501,
++          "encode_us": 15.06,
++          "evaluate_us": 603.682,
++          "iterations": 369,
++          "total_us": 630.25
++        },
++        "lean": {
++          "decode_us": 11.215,
++          "encode_us": 3.511,
++          "evaluate_us": 616.841,
++          "iterations": 401,
++          "total_us": 634.226
++        },
++        "matrix": {
++          "iterations": 400,
++          "total_us": 632.0450000000001
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "domain2": {
++        "full": {
++          "decode_us": 11.918,
++          "encode_us": 13.977,
++          "evaluate_us": 611.2869999999999,
++          "iterations": 389,
++          "total_us": 638.8910000000001
++        },
++        "lean": {
++          "decode_us": 12.744,
++          "encode_us": 3.421,
++          "evaluate_us": 586.013,
++          "iterations": 415,
++          "total_us": 603.253
++        },
++        "matrix": {
++          "iterations": 398,
++          "total_us": 600.8679999999999
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "invalid": {
++        "full": {
++          "decode_us": 924.4989999999999,
++          "encode_us": 55.738,
++          "evaluate_us": 85.01,
++          "iterations": 175,
++          "total_us": 1070.517
++        },
++        "lean": {
++          "decode_us": 954.2520000000001,
++          "encode_us": 58.132,
++          "evaluate_us": 87.298,
++          "iterations": 224,
++          "total_us": 1101.266
++        },
++        "matrix": {
++          "iterations": 6816,
++          "total_us": 26.715
++        },
++        "rows": 1024,
++        "workers": 1
+       },
+-      "full_workers_2": {
+-        "iterations": 323,
+-        "total_us": 496.48
++      "lane_kernel": "avx512f, 16 lanes",
++      "lane_width": 16,
++      "one": {
++        "full": {
++          "decode_us": 0.268,
++          "encode_us": 0.38,
++          "evaluate_us": 2.12,
++          "iterations": 5128,
++          "total_us": 2.784
++        },
++        "lean": {
++          "decode_us": 0.253,
++          "encode_us": 0.14600000000000002,
++          "evaluate_us": 2.114,
++          "iterations": 20001,
++          "total_us": 2.5260000000000002
++        },
++        "matrix": {
++          "iterations": 20001,
++          "total_us": 2.093
++        },
++        "rows": 1,
++        "workers": 1
+       },
+-      "full_workers_4": {
+-        "iterations": 467,
+-        "total_us": 492.32599999999996
++      "parallel": {
++        "full": {
++          "decode_us": 21.985,
++          "encode_us": 28.691,
++          "evaluate_us": 123.96600000000001,
++          "iterations": 501,
++          "total_us": 178.743
++        },
++        "lean": {
++          "decode_us": 21.693,
++          "encode_us": 8.937,
++          "evaluate_us": 115.821,
++          "iterations": 1664,
++          "total_us": 149.755
++        },
++        "matrix": {
++          "iterations": 1431,
++          "total_us": 119.183
++        },
++        "rows": 96,
++        "workers": 4
+       },
+-      "matrix_workers_1": {
+-        "iterations": 398,
+-        "total_us": 629.291
++      "serial": {
++        "full": {
++          "decode_us": 15.354,
++          "encode_us": 25.196,
++          "evaluate_us": 33.935,
++          "iterations": 1553,
++          "total_us": 74.825
++        },
++        "lean": {
++          "decode_us": 15.384,
++          "encode_us": 5.2059999999999995,
++          "evaluate_us": 32.147000000000006,
++          "iterations": 2805,
++          "total_us": 53.516
++        },
++        "matrix": {
++          "iterations": 7251,
++          "total_us": 28.985
++        },
++        "rows": 96,
++        "workers": 1
+       },
+-      "matrix_workers_2": {
+-        "iterations": 615,
+-        "total_us": 438.315
++      "trace": {
++        "full": {
++          "decode_us": 3.636,
++          "encode_us": 92.465,
++          "evaluate_us": 31.116,
++          "iterations": 1204,
++          "total_us": 129.423
++        },
++        "rows": 12,
++        "workers": 1
+       },
+-      "matrix_workers_4": {
+-        "iterations": 545,
+-        "total_us": 463.966
++      "worker_scaling": {
++        "domain": {
++          "full_workers_1": {
++            "iterations": 222,
++            "total_us": 518.26
++          },
++          "full_workers_2": {
++            "iterations": 419,
++            "total_us": 476.437
++          },
++          "full_workers_4": {
++            "iterations": 457,
++            "total_us": 541.9240000000001
++          },
++          "matrix_workers_1": {
++            "iterations": 303,
++            "total_us": 687.336
++          },
++          "matrix_workers_2": {
++            "iterations": 393,
++            "total_us": 453.801
++          },
++          "matrix_workers_4": {
++            "iterations": 511,
++            "total_us": 460.429
++          }
++        },
++        "serial": {
++          "full_workers_1": {
++            "iterations": 2088,
++            "total_us": 82.50999999999999
++          },
++          "full_workers_2": {
++            "iterations": 767,
++            "total_us": 123.04500000000002
++          },
++          "full_workers_4": {
++            "iterations": 1161,
++            "total_us": 189.643
++          },
++          "matrix_workers_1": {
++            "iterations": 7098,
++            "total_us": 35.611000000000004
++          },
++          "matrix_workers_2": {
++            "iterations": 4927,
++            "total_us": 66.333
++          },
++          "matrix_workers_4": {
++            "iterations": 1251,
++            "total_us": 111.03999999999999
++          }
++        }
+       }
+     },
+-    "serial": {
+-      "full_workers_1": {
+-        "iterations": 2402,
+-        "total_us": 77.189
++    {
++      "domain": {
++        "full": {
++          "decode_us": 10.947000000000001,
++          "encode_us": 15.23,
++          "evaluate_us": 624.1709999999999,
++          "iterations": 366,
++          "total_us": 649.7280000000001
++        },
++        "lean": {
++          "decode_us": 12.128,
++          "encode_us": 4.32,
++          "evaluate_us": 635.783,
++          "iterations": 353,
++          "total_us": 654.067
++        },
++        "matrix": {
++          "iterations": 404,
++          "total_us": 772.127
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "domain2": {
++        "full": {
++          "decode_us": 12.948,
++          "encode_us": 14.238,
++          "evaluate_us": 628.909,
++          "iterations": 258,
++          "total_us": 657.198
++        },
++        "lean": {
++          "decode_us": 15.471000000000002,
++          "encode_us": 4.877,
++          "evaluate_us": 635.259,
++          "iterations": 266,
++          "total_us": 653.864
++        },
++        "matrix": {
++          "iterations": 401,
++          "total_us": 853.4830000000001
++        },
++        "rows": 48,
++        "workers": 1
++      },
++      "invalid": {
++        "full": {
++          "decode_us": 1860.587,
++          "encode_us": 108.101,
++          "evaluate_us": 146.101,
++          "iterations": 107,
++          "total_us": 2123.6150000000002
++        },
++        "lean": {
++          "decode_us": 1318.81,
++          "encode_us": 76.431,
++          "evaluate_us": 123.542,
++          "iterations": 123,
++          "total_us": 1523.8619999999999
++        },
++        "matrix": {
++          "iterations": 8362,
++          "total_us": 26.795
++        },
++        "rows": 1024,
++        "workers": 1
+       },
+-      "full_workers_2": {
+-        "iterations": 693,
+-        "total_us": 113.976
++      "lane_kernel": "avx512f, 16 lanes",
++      "lane_width": 16,
++      "one": {
++        "full": {
++          "decode_us": 0.277,
++          "encode_us": 0.38799999999999996,
++          "evaluate_us": 2.121,
++          "iterations": 15189,
++          "total_us": 2.796
++        },
++        "lean": {
++          "decode_us": 0.256,
++          "encode_us": 0.14600000000000002,
++          "evaluate_us": 2.115,
++          "iterations": 20001,
++          "total_us": 2.531
++        },
++        "matrix": {
++          "iterations": 20001,
++          "total_us": 2.0940000000000003
++        },
++        "rows": 1,
++        "workers": 1
+       },
+-      "full_workers_4": {
+-        "iterations": 1336,
+-        "total_us": 173.52
++      "parallel": {
++        "full": {
++          "decode_us": 23.264999999999997,
++          "encode_us": 31.758000000000003,
++          "evaluate_us": 131.898,
++          "iterations": 397,
++          "total_us": 189.21
++        },
++        "lean": {
++          "decode_us": 23.891,
++          "encode_us": 9.639999999999999,
++          "evaluate_us": 137.716,
++          "iterations": 1234,
++          "total_us": 175.104
++        },
++        "matrix": {
++          "iterations": 1655,
++          "total_us": 113.265
++        },
++        "rows": 96,
++        "workers": 4
+       },
+-      "matrix_workers_1": {
+-        "iterations": 5363,
+-        "total_us": 28.793
++      "serial": {
++        "full": {
++          "decode_us": 15.357,
++          "encode_us": 25.25,
++          "evaluate_us": 34.56,
++          "iterations": 1681,
++          "total_us": 75.19
++        },
++        "lean": {
++          "decode_us": 15.652,
++          "encode_us": 5.262,
++          "evaluate_us": 32.072,
++          "iterations": 3539,
++          "total_us": 54.232
++        },
++        "matrix": {
++          "iterations": 6852,
++          "total_us": 28.841
++        },
++        "rows": 96,
++        "workers": 1
+       },
+-      "matrix_workers_2": {
+-        "iterations": 2495,
+-        "total_us": 57.416000000000004
++      "trace": {
++        "full": {
++          "decode_us": 3.1310000000000002,
++          "encode_us": 82.235,
++          "evaluate_us": 28.680999999999997,
++          "iterations": 1572,
++          "total_us": 117.812
++        },
++        "rows": 12,
++        "workers": 1
+       },
+-      "matrix_workers_4": {
+-        "iterations": 2502,
+-        "total_us": 105.832
++      "worker_scaling": {
++        "domain": {
++          "full_workers_1": {
++            "iterations": 263,
++            "total_us": 665.6519999999999
++          },
++          "full_workers_2": {
++            "iterations": 352,
++            "total_us": 478.056
++          },
++          "full_workers_4": {
++            "iterations": 182,
++            "total_us": 523.895
++          },
++          "matrix_workers_1": {
++            "iterations": 390,
++            "total_us": 621.3180000000001
++          },
++          "matrix_workers_2": {
++            "iterations": 518,
++            "total_us": 448.488
++          },
++          "matrix_workers_4": {
++            "iterations": 514,
++            "total_us": 450.543
++          }
++        },
++        "serial": {
++          "full_workers_1": {
++            "iterations": 2085,
++            "total_us": 105.519
++          },
++          "full_workers_2": {
++            "iterations": 634,
++            "total_us": 161.829
++          },
++          "full_workers_4": {
++            "iterations": 1074,
++            "total_us": 232.707
++          },
++          "matrix_workers_1": {
++            "iterations": 7073,
++            "total_us": 29.128
++          },
++          "matrix_workers_2": {
++            "iterations": 4396,
++            "total_us": 71.571
++          },
++          "matrix_workers_4": {
++            "iterations": 2120,
++            "total_us": 124.02600000000001
++          }
++        }
+       }
+     }
+-  }
+-}
++  ]
++}
+\ No newline at end of file
+diff --git a/evidence/performance-0.3.0/monitored-budget.json b/evidence/performance-0.3.0/monitored-budget.json
+new file mode 100644
+index 0000000..b43ea87
+--- /dev/null
++++ b/evidence/performance-0.3.0/monitored-budget.json
+@@ -0,0 +1,53 @@
++{
++  "workload": "48 rows, PD, 4,000 steps, score_matrix, one worker",
++  "results": {
++    "unmonitored": {
++      "median_ms": 0.6315110003924929,
++      "repeats_ms": [
++        0.6165939994389191,
++        0.6255549997149501,
++        0.6778599999961443,
++        0.6621289994654944,
++        0.6280210000113584,
++        0.654583999676106,
++        0.6171559998620069,
++        0.6315110003924929,
++        0.6411490003301878,
++        0.6067449994588969,
++        0.656670999887865
++      ]
++    },
++    "wall_ms": {
++      "median_ms": 12.989888000447536,
++      "repeats_ms": [
++        12.87952300026518,
++        13.077691000034974,
++        12.963381000190566,
++        12.931526999636844,
++        12.95711799957644,
++        12.969114000043191,
++        13.192607000746648,
++        12.989888000447536,
++        13.152773000001616,
++        13.152555000488064,
++        13.312419000612863
++      ]
++    },
++    "cancel_file_absent": {
++      "median_ms": 96.95374999955675,
++      "repeats_ms": [
++        99.30588600036572,
++        105.20587900009559,
++        121.91541999982292,
++        96.92363399972237,
++        91.9922699995368,
++        90.58146300048975,
++        92.99591800026974,
++        84.34311900055036,
++        98.40770400023757,
++        97.06698399986635,
++        96.95374999955675
++      ]
++    }
++  }
++}
+diff --git a/evidence/performance-0.3.0/python-call-cost.json b/evidence/performance-0.3.0/python-call-cost.json
+new file mode 100644
+index 0000000..f3e157f
+--- /dev/null
++++ b/evidence/performance-0.3.0/python-call-cost.json
+@@ -0,0 +1,220 @@
++{
++  "host": "2 vCPUs, Intel(R) Xeon(R) Processor @ 2.10GHz (KVM), Rust 1.97.0, CPython 3.12.3, taskset -c 0",
++  "note": "Per-row cost of objective calls through the installed wheel (median of 7 repeats of 2,000 rows), and Prepared() cost in fresh processes.",
++  "call_cost": {
++    "0.2.0": {
++      "evaluate_full": {
++        "median_us_per_row": 14.805111500209023,
++        "repeats_us": [
++          14.752114999737387,
++          14.973562999784917,
++          14.711609499954648,
++          14.805111500209023,
++          14.89988799994535,
++          14.777475999835588,
++          14.819354000337626
++        ]
++      },
++      "scores_one": {
++        "median_us_per_row": 10.396715500064602,
++        "repeats_us": [
++          10.485573499863676,
++          10.506707500098855,
++          10.408053999981348,
++          10.396715500064602,
++          10.331868000321265,
++          10.389068499989662,
++          10.31260050012861
++        ]
++      },
++      "scores_96_per_row": {
++        "median_us_per_row": 3.83131406257083,
++        "repeats_us": [
++          3.7599953126724968,
++          4.210183332986617,
++          3.8513083334616267,
++          3.968263020700154,
++          3.831181770882116,
++          3.83131406257083,
++          3.6905427080569098
++        ]
++      },
++      "batch_96_per_row": {
++        "median_us_per_row": 7.562510416884531,
++        "repeats_us": [
++          7.740484375062805,
++          7.648202604570997,
++          7.43864583322799,
++          7.587193229123083,
++          7.562510416884531,
++          7.541248437329766,
++          7.162411458712843
++        ]
++      }
++    },
++    "0.3.0": {
++      "evaluate_full": {
++        "median_us_per_row": 13.845287000094686,
++        "repeats_us": [
++          18.01649399976668,
++          13.314083999830473,
++          13.005887500185054,
++          13.077826999960962,
++          14.097646000209352,
++          13.845287000094686,
++          14.028317999873252
++        ]
++      },
++      "scores_one": {
++        "median_us_per_row": 10.706276500059175,
++        "repeats_us": [
++          10.901922500124783,
++          10.706276500059175,
++          10.639719999744557,
++          10.579291500107502,
++          10.8100329998706,
++          10.558492499967542,
++          10.89668550002898
++        ]
++      },
++      "score_matrix_one": {
++        "median_us_per_row": 4.880829500052641,
++        "repeats_us": [
++          4.871404000368784,
++          4.846178499974485,
++          4.880829500052641,
++          4.853016499964724,
++          4.920523500004492,
++          5.960837499969784,
++          5.76035049971324
++        ]
++      },
++      "score_matrix_96_per_row": {
++        "median_us_per_row": 0.7956255207849002,
++        "repeats_us": [
++          0.8006718748750549,
++          0.7416354165457051,
++          0.8430921875894153,
++          0.6204453129043941,
++          0.6550713540794579,
++          0.8061630211386728,
++          0.7956255207849002
++        ]
++      },
++      "scores_96_per_row": {
++        "median_us_per_row": 3.525953125442053,
++        "repeats_us": [
++          2.639384374939861,
++          2.5002520833557655,
++          3.525953125442053,
++          3.6413520831501955,
++          3.829893229105134,
++          4.052459895831362,
++          2.4520447918045343
++        ]
++      },
++      "batch_96_per_row": {
++        "median_us_per_row": 4.443090104189196,
++        "repeats_us": [
++          4.483096354116848,
++          4.411182812683971,
++          4.437517187246462,
++          4.443090104189196,
++          4.461213021045296,
++          4.214475000215619,
++          4.446283333455388
++        ]
++      }
++    }
++  },
++  "prepare_cost": {
++    "0.2.0": [
++      {
++        "import_ms": 18.358239999543002,
++        "first_prepare_us": 74.5879997339216,
++        "steady_prepare_us_median": 6.07694000018455,
++        "steady_repeats_us": [
++          6.194876500103419,
++          6.32633800023541,
++          6.07694000018455,
++          6.153543999971589,
++          5.962063500192016,
++          5.908046500280761,
++          5.915758999890386
++        ]
++      },
++      {
++        "import_ms": 17.726886999298586,
++        "first_prepare_us": 75.4510001570452,
++        "steady_prepare_us_median": 5.987908999941283,
++        "steady_repeats_us": [
++          6.007361999763816,
++          5.860847500116506,
++          5.750038999849494,
++          5.912847499985219,
++          6.147641499865131,
++          6.04663750027612,
++          5.987908999941283
++        ]
++      },
++      {
++        "import_ms": 21.10775700020895,
++        "first_prepare_us": 86.63700009492459,
++        "steady_prepare_us_median": 6.5966430001935805,
++        "steady_repeats_us": [
++          6.264658999953099,
++          6.198060500082647,
++          6.5966430001935805,
++          7.138777500131255,
++          6.881069499740988,
++          6.531219500175212,
++          6.63987999996607
++        ]
++      }
++    ],
++    "0.3.0": [
++      {
++        "import_ms": 18.78182799919159,
++        "first_prepare_us": 166.4040000832756,
++        "steady_prepare_us_median": 6.737930999861419,
++        "steady_repeats_us": [
++          6.772931000341487,
++          6.451620000007097,
++          6.737930999861419,
++          7.106404499609198,
++          6.945436500245705,
++          6.399053000222921,
++          6.3202700002875645
++        ]
++      },
++      {
++        "import_ms": 16.532337999706215,
++        "first_prepare_us": 140.13399959367234,
++        "steady_prepare_us_median": 5.960365499959153,
++        "steady_repeats_us": [
++          6.641075000061392,
++          6.110743000135699,
++          5.960365499959153,
++          5.974138000055973,
++          5.772479499682959,
++          5.678084999999555,
++          5.472832499890501
++        ]
++      },
++      {
++        "import_ms": 16.989070999443356,
++        "first_prepare_us": 170.27700050675776,
++        "steady_prepare_us_median": 6.114721999892936,
++        "steady_repeats_us": [
++          6.045629500022187,
++          6.264366500090546,
++          6.0875670001223625,
++          6.017587999849638,
++          6.348560500100575,
++          6.273086999954103,
++          6.114721999892936
++        ]
++      }
++    ]
++  }
++}
+\ No newline at end of file
+diff --git a/evidence/performance-0.3.0/python-optimization.json b/evidence/performance-0.3.0/python-optimization.json
+new file mode 100644
+index 0000000..29538b1
+--- /dev/null
++++ b/evidence/performance-0.3.0/python-optimization.json
+@@ -0,0 +1,508 @@
++{
++  "host": "2 vCPUs, Intel(R) Xeon(R) Processor @ 2.10GHz (KVM), Rust 1.97.0, CPython 3.12.3, taskset -c 0",
++  "wheel_0.3.0": "built with maturin 1.9.6 from the extracted 0.3.0 sdist",
++  "wheel_0.2.0": "packages/robotics_control_craft-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl from the 0.2.0 delivery",
++  "runs_per_configuration": 7,
++  "runs": {
++    "v0.2.0-full": [
++      {
++        "mode": "full",
++        "total_seconds": 0.006278481000663305,
++        "prepare_seconds": 8.188500032701995e-05,
++        "search_seconds": 0.0060642899998129,
++        "replay_seconds": 0.0001323060005233856,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.007149299000047904,
++        "prepare_seconds": 0.0001118200007113046,
++        "search_seconds": 0.006863348999104346,
++        "replay_seconds": 0.00017413000023225322,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.009179730999676394,
++        "prepare_seconds": 0.00020875899917882634,
++        "search_seconds": 0.008723072000066168,
++        "replay_seconds": 0.00024790000043140026,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.009813947999646189,
++        "prepare_seconds": 0.00013201000001572538,
++        "search_seconds": 0.009481314000368002,
++        "replay_seconds": 0.00020062399926246144,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.005452904999401653,
++        "prepare_seconds": 7.803700009390013e-05,
++        "search_seconds": 0.005242737000116904,
++        "replay_seconds": 0.00013213099919084925,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.00897338499999023,
++        "prepare_seconds": 0.00010119400030816905,
++        "search_seconds": 0.008691349999935483,
++        "replay_seconds": 0.00018084099974657875,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.008632359000330325,
++        "prepare_seconds": 9.732899980008369e-05,
++        "search_seconds": 0.00831646599999658,
++        "replay_seconds": 0.00021856400053366087,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      }
++    ],
++    "v0.2.0-scores": [
++      {
++        "mode": "scores",
++        "total_seconds": 0.005038661000071443,
++        "prepare_seconds": 9.401400075148558e-05,
++        "search_seconds": 0.004794566999407834,
++        "replay_seconds": 0.00015007999991212273,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.006368926000504871,
++        "prepare_seconds": 0.00010813700009748572,
++        "search_seconds": 0.00602684500063333,
++        "replay_seconds": 0.00023394399977405556,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.007810969000274781,
++        "prepare_seconds": 0.00011377400005585514,
++        "search_seconds": 0.007515157999478106,
++        "replay_seconds": 0.00018203700074082008,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.005022381999879144,
++        "prepare_seconds": 7.596399973408552e-05,
++        "search_seconds": 0.0048056720006570686,
++        "replay_seconds": 0.00014074599948799005,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.005385759000091639,
++        "prepare_seconds": 8.333900041179731e-05,
++        "search_seconds": 0.0051461929997458356,
++        "replay_seconds": 0.00015622699993400602,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.008795234999524837,
++        "prepare_seconds": 0.00011805200028902618,
++        "search_seconds": 0.008434946999841486,
++        "replay_seconds": 0.0002422359993943246,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.0052909050000380375,
++        "prepare_seconds": 8.362900007341523e-05,
++        "search_seconds": 0.005055228999481187,
++        "replay_seconds": 0.0001520470004834351,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      }
++    ],
++    "v0.3.0-full": [
++      {
++        "mode": "full",
++        "total_seconds": 0.010825299999851268,
++        "prepare_seconds": 0.0001855020000220975,
++        "search_seconds": 0.010388374999820371,
++        "replay_seconds": 0.00025142300000879914,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.007969821000187949,
++        "prepare_seconds": 0.0001732400005494128,
++        "search_seconds": 0.007660508999833837,
++        "replay_seconds": 0.00013607199980469886,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.006317356999716139,
++        "prepare_seconds": 0.00014474999989033677,
++        "search_seconds": 0.006014024999785761,
++        "replay_seconds": 0.00015858200004004175,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.006172202000016114,
++        "prepare_seconds": 0.00013559099988924572,
++        "search_seconds": 0.005907300000217219,
++        "replay_seconds": 0.00012931099990964867,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.005331104000106279,
++        "prepare_seconds": 0.00013418399976217188,
++        "search_seconds": 0.005090247000225645,
++        "replay_seconds": 0.00010667300011846237,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.00725830200008204,
++        "prepare_seconds": 0.00015083600010257214,
++        "search_seconds": 0.006950191999749222,
++        "replay_seconds": 0.0001572740002302453,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "full",
++        "total_seconds": 0.0057735189993763925,
++        "prepare_seconds": 0.0001640149994273088,
++        "search_seconds": 0.005490786999871489,
++        "replay_seconds": 0.000118717000077595,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      }
++    ],
++    "v0.3.0-scores": [
++      {
++        "mode": "scores",
++        "total_seconds": 0.0057065330001933035,
++        "prepare_seconds": 0.00019972799964307342,
++        "search_seconds": 0.005375665000428853,
++        "replay_seconds": 0.00013114000012137694,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.0050042160000884905,
++        "prepare_seconds": 0.00013461100024869666,
++        "search_seconds": 0.004755304999889631,
++        "replay_seconds": 0.0001142999999501626,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.00572697400002653,
++        "prepare_seconds": 0.0002735090001806384,
++        "search_seconds": 0.005325240999809466,
++        "replay_seconds": 0.00012822400003642542,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.0044470359998740605,
++        "prepare_seconds": 0.00013233499976195162,
++        "search_seconds": 0.004187898000054702,
++        "replay_seconds": 0.0001268030000574072,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.007852581000406644,
++        "prepare_seconds": 0.0001505250002082903,
++        "search_seconds": 0.0075462840004547616,
++        "replay_seconds": 0.00015577199974359246,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.005177261999961047,
++        "prepare_seconds": 0.00014738600020791637,
++        "search_seconds": 0.004905382999822905,
++        "replay_seconds": 0.00012449299993022578,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "scores",
++        "total_seconds": 0.00909673499972996,
++        "prepare_seconds": 0.00022133099992061034,
++        "search_seconds": 0.008680681999976514,
++        "replay_seconds": 0.00019472199983283645,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      }
++    ],
++    "v0.3.0-matrix": [
++      {
++        "mode": "matrix",
++        "total_seconds": 0.0046953490000305464,
++        "prepare_seconds": 0.0001878890006992151,
++        "search_seconds": 0.0043615849999696366,
++        "replay_seconds": 0.0001458749993616948,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.004907819999971252,
++        "prepare_seconds": 0.00013518400010070764,
++        "search_seconds": 0.004625434999979916,
++        "replay_seconds": 0.00014720099989062874,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.005572028999267786,
++        "prepare_seconds": 0.0001374240000586724,
++        "search_seconds": 0.005261397999674955,
++        "replay_seconds": 0.00017320699953415897,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.00472868299948459,
++        "prepare_seconds": 0.00014216899944585748,
++        "search_seconds": 0.004429321999850799,
++        "replay_seconds": 0.00015719200018793344,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.00660800300011033,
++        "prepare_seconds": 0.0001447790000383975,
++        "search_seconds": 0.00629051400028402,
++        "replay_seconds": 0.00017270999978791224,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.004905060999590205,
++        "prepare_seconds": 0.00017092699999921024,
++        "search_seconds": 0.0045832659998268355,
++        "replay_seconds": 0.00015086799976415932,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      },
++      {
++        "mode": "matrix",
++        "total_seconds": 0.004440234999492532,
++        "prepare_seconds": 0.00012559399965539342,
++        "search_seconds": 0.004167726000559924,
++        "replay_seconds": 0.00014691499927721452,
++        "evaluations": 48,
++        "failures": 0,
++        "best": [
++          5.574900894396944,
++          2.6972219501353756
++        ],
++        "score": 0.24281542939165648
++      }
++    ]
++  }
++}
+\ No newline at end of file
+diff --git a/examples/matrix.rs b/examples/matrix.rs
+new file mode 100644
+index 0000000..cb3b27b
+--- /dev/null
++++ b/examples/matrix.rs
+@@ -0,0 +1,40 @@
++//! Grid search over PD gains with the typed score-matrix API.
++//!
++//! `cargo run --release --locked --example matrix -- models/example.json`
++use robotics_control_craft::Prepared;
++use serde_json::Value;
++use std::io;
++
++fn main() -> Result<(), io::Error> {
++    let file = std::env::args_os()
++        .nth(1)
++        .ok_or_else(|| io::Error::other("example.json path required"))?;
++    let example: Value = serde_json::from_str(&std::fs::read_to_string(file)?)?;
++    let prepared = Prepared::new(&example["model"].to_string()).map_err(io::Error::other)?;
++    // Row-major gains: kp in 0..=20, kd in 0..=8 (step 0.5).
++    let gains: Vec<[f64; 2]> = (0..=20)
++        .flat_map(|p| (0..=16).map(move |d| [f64::from(p), f64::from(d) * 0.5]))
++        .collect();
++    let parameters: Vec<f64> = gains.iter().flatten().copied().collect();
++    let rows = prepared
++        .score_matrix(gains.len(), &parameters, r#"{"workers":2}"#)
++        .map_err(io::Error::other)?;
++    let complete = rows.iter().filter(|r| r.status == "complete").count();
++    let (best, row) = rows
++        .iter()
++        .enumerate()
++        .filter_map(|(i, r)| r.score.map(|s| (i, s)))
++        .min_by(|a, b| a.1.total_cmp(&b.1))
++        .map(|(i, _)| (gains[i], &rows[i]))
++        .ok_or_else(|| io::Error::other("no complete row"))?;
++    println!(
++        "{} rows, {complete} complete; best kp={} kd={} score={} steps={}",
++        rows.len(),
++        best[0],
++        best[1],
++        row.score.unwrap(),
++        row.steps
++    );
++    println!("model sha256 {}", prepared.model_sha256());
++    Ok(())
++}
+diff --git a/examples/python/README.md b/examples/python/README.md
+new file mode 100644
+index 0000000..e2ac069
+--- /dev/null
++++ b/examples/python/README.md
+@@ -0,0 +1,32 @@
++# Python examples
++
++Each script answers one question with the installed `robotics_control_craft`
++package and runs in well under a minute. Run them from the package root, for
++example `python examples/python/pd_gain_study.py`. The recorded output of each
++run is in [`outputs/`](outputs/). The optimization examples need SciPy and
++fcmaes (`pip install scipy fcmaes`); all scripts need NumPy.
++
++## Application examples
++
++| Script | Question | APIs |
++| --- | --- | --- |
++| [`pd_gain_study.py`](pd_gain_study.py) | Which PD gains settle the packaged oscillator best, and what is the trade-off between tracking error and effort? Does the ranking survive a halved step? | `score_matrix`, `batch`, `evaluate`, `model_sha256` |
++| [`scenario_robustness.py`](scenario_robustness.py) | How do four controllers degrade over 40 sampled mass and damping scenarios, and which gains overshoot a target near the position limit? | `score_matrix` per scenario, failure records |
++| [`held_actuation_and_convergence.py`](held_actuation_and_convergence.py) | Which held braking schedule works best? How fast does RK4 converge against a matrix-exponential reference? What does a trace contain? | held control, `evaluate(trace=True)`, SciPy `expm` |
++| [`parameter_sensitivity.py`](parameter_sensitivity.py) | Which plant, initial-state and controller settings change the score most for a fixed controller? | perturbed `Prepared` models, `score_matrix` |
++
++## Optimization examples
++
++| Script | Optimizer | Problem | Evaluation pattern |
++| --- | --- | --- | --- |
++| [`scipy_de_tuning.py`](scipy_de_tuning.py) | SciPy `differential_evolution(vectorized=True)` and bounded Nelder-Mead | PD gains for a target near the position limit, 1 ms step | one `score_matrix` call per generation on two native workers; penalty for failed rows |
++| [`fcmaes_cmaes_held_schedule.py`](fcmaes_cmaes_held_schedule.py) | fcmaes `cmaes.Cmaes` ask/tell | six held forces over 4 s at a 1 ms step | each population of 24 in one `score_matrix` call (lockstep lanes, two workers); penalty for failed rows |
++| [`fcmaes_bite_robust_pd.py`](fcmaes_bite_robust_pd.py) | fcmaes `bitecpp.minimize` | robust PD gains over eight sampled plants, checked on 32 held-out plants | one-row `score_matrix` calls inside a standard minimizer; penalty per failed rollout |
++
++The Rust example [`../matrix.rs`](../matrix.rs) runs a gain grid through
++`Prepared::score_matrix`:
++`cargo run --release --locked --example matrix -- models/example.json`
++(output in [`outputs/rust_matrix.txt`](outputs/rust_matrix.txt)).
++
++See the [user manual](../../docs/user-manual.md) for the model reference and
++the APIs these scripts use.
+diff --git a/examples/python/fcmaes_bite_robust_pd.py b/examples/python/fcmaes_bite_robust_pd.py
+new file mode 100644
+index 0000000..c3613aa
+--- /dev/null
++++ b/examples/python/fcmaes_bite_robust_pd.py
+@@ -0,0 +1,81 @@
++"""fcmaes BiteOpt: robust PD gains across sampled plants, with failure penalties.
++
++The controller must move the mass from rest at 0 m to 1.9 m, close to the 2 m
++position limit, for any payload mass between 0.6 and 1.6 kg and damping between
++0.1 and 0.7 N s/m. The derivative gain is limited to 4 N s/m (for example by
++sensor noise). The objective is the mean score over eight training scenarios;
++every non-complete rollout (infeasible overshoot or invalid gains) adds a
++penalty.
++`bitecpp.minimize` is a standard fcmaes minimizer that calls the objective one
++candidate at a time, so each call scores one row on the eight prepared
++scenario models. The winner is then checked on 32 held-out scenarios against
++gains tuned on the nominal plant only.
++
++Run: python examples/python/fcmaes_bite_robust_pd.py
++"""
++
++import random
++
++import numpy as np
++from loguru import logger
++from scipy.optimize import Bounds
++
++from fcmaes import bitecpp
++from robotics_control_craft import Prepared, load_example
++
++logger.remove()
++base = load_example()["model"] | {
++    "dt_s": 0.01, "horizon_s": 4.0, "target_m": 1.9, "initial_x_m": 0.0, "initial_v_m_s": 0.0,
++}
++
++
++def sample(seed, count):
++    rng = random.Random(seed)
++    return [base | {"mass_kg": rng.uniform(0.6, 1.6), "damping_ns_per_m": rng.uniform(0.1, 0.7)}
++            for _ in range(count)]
++
++
++def objective_for(models, penalty=5.0):
++    prepared = [Prepared(m) for m in models]
++    counter = {"calls": 0, "failed": 0}
++
++    def objective(x):
++        counter["calls"] += 1
++        total = 0.0
++        for p in prepared:
++            scores, statuses, _ = p.score_matrix([x.tolist()])
++            if statuses[0] == "complete":
++                total += scores[0]
++            else:
++                counter["failed"] += 1
++                total += penalty
++        return total / len(prepared)
++
++    return objective, counter
++
++
++bounds = Bounds([0.0, 0.0], [40.0, 4.0])
++robust, robust_count = objective_for(sample(1, 8))
++r = bitecpp.minimize(robust, bounds, x0=[5.0, 2.0], max_evaluations=1500,
++                     rg=np.random.default_rng(5))
++print(f"robust gains {np.round(r.x, 5).tolist()}, training mean {r.fun:.6f},"
++      f" {robust_count['calls']} calls, {robust_count['failed']} failed rollouts penalized")
++
++nominal, nominal_count = objective_for([base])
++n = bitecpp.minimize(nominal, bounds, x0=[5.0, 2.0], max_evaluations=1500,
++                     rg=np.random.default_rng(5))
++print(f"nominal gains {np.round(n.x, 5).tolist()}, nominal score {n.fun:.6f},"
++      f" {nominal_count['failed']} failed rollouts penalized")
++
++holdout = sample(99, 32)
++print("\nheld-out evaluation over 32 scenarios (scores over completed rollouts)")
++print("gains      mean score  worst score  infeasible")
++for name, x in (("robust", r.x), ("nominal", n.x)):
++    scores, failed = [], 0
++    for m in holdout:
++        s, st, _ = Prepared(m).score_matrix([x.tolist()])
++        if st[0] == "complete":
++            scores.append(s[0])
++        else:
++            failed += 1
++    print(f"{name:9s} {np.mean(scores):11.6f} {np.max(scores):12.6f} {failed:11d}")
+diff --git a/examples/python/fcmaes_cmaes_held_schedule.py b/examples/python/fcmaes_cmaes_held_schedule.py
+new file mode 100644
+index 0000000..66b5e87
+--- /dev/null
++++ b/examples/python/fcmaes_cmaes_held_schedule.py
+@@ -0,0 +1,69 @@
++"""fcmaes CMA-ES ask/tell: optimize a held-force schedule population-wise.
++
++The mass starts at 1 m with 0.2 m/s and must come to rest at the origin within
++4 s (1 ms step). Actuation is held: six constant forces between switch times
++0.5, 1, 1.5, 2.5 and 3.25 s, each within the 3 N force limit. CMA-ES from
++fcmaes asks for a population of 24 schedules per generation; the whole
++population is scored with one `score_matrix` call on two native workers,
++which integrates the rows in lockstep lanes. Rows that fail (for example a
++force outside the limit) get a penalty.
++
++Run: python examples/python/fcmaes_cmaes_held_schedule.py
++"""
++
++import numpy as np
++from loguru import logger
++from scipy.optimize import Bounds
++
++from fcmaes import cmaes
++from robotics_control_craft import Prepared, load_example
++
++logger.remove()
++switches = [0.5, 1.0, 1.5, 2.5, 3.25]
++model = load_example()["model"] | {
++    "dt_s": 0.001, "horizon_s": 4.0, "control": {"kind": "held", "switches_s": switches},
++}
++prepared = Prepared(model)
++limit = model["force_limit_n"]
++PENALTY = 10.0
++
++rng = np.random.default_rng(11)
++optimizer = cmaes.Cmaes(
++    bounds=Bounds([-limit] * 6, [limit] * 6),
++    x0=np.zeros(6),
++    input_sigma=1.0,
++    popsize=24,
++    rg=rng,
++    randn=lambda *shape: rng.standard_normal(shape),
++)
++best_score, best_x, evaluations, failures = np.inf, None, 0, 0
++for generation in range(1, 151):
++    xs = optimizer.ask()
++    scores, statuses, _ = prepared.score_matrix(xs, workers=2)
++    scores = np.asarray(scores)
++    failed = np.array([s != "complete" for s in statuses])
++    scores[failed] = PENALTY
++    evaluations += len(xs)
++    failures += int(failed.sum())
++    i = int(np.argmin(scores))
++    if scores[i] < best_score:
++        best_score, best_x = float(scores[i]), xs[i].copy()
++    stop = optimizer.tell(scores)
++    if generation % 25 == 0 or stop:
++        print(f"generation {generation:3d}: best score {best_score:.9f}")
++    if stop:
++        print(f"CMA-ES stop code {stop}")
++        break
++
++print(f"{evaluations} schedules evaluated, {failures} penalized")
++print("best forces (N):", np.round(best_x, 4).tolist())
++row = prepared.evaluate(best_x.tolist())
++m = row["metrics"]
++print(f"replay score {row['score']:.9f}, terminal x {m['terminal_position_m']:.3e} m,"
++      f" v {m['terminal_velocity_m_s']:.3e} m/s, effort {m['integrated_force_squared']:.4f} N^2 s")
++hand = prepared.evaluate([-3.0, -1.0, 0.0, 0.0, 0.0, 0.0])
++print(f"hand-made brake-then-hold schedule: score {hand['score']:.6f}")
++coarse = Prepared(model | {"dt_s": 0.1}).evaluate(best_x.tolist(), trace=True)
++segments = list(dict.fromkeys(round(r[3], 4) for r in coarse["metrics"]["trace"]))
++print(f"coarse traced replay at dt=0.1 s: {len(coarse['metrics']['trace'])} rows,"
++      f" forces in order {segments}")
+diff --git a/examples/python/held_actuation_and_convergence.py b/examples/python/held_actuation_and_convergence.py
+new file mode 100644
+index 0000000..31e19e6
+--- /dev/null
++++ b/examples/python/held_actuation_and_convergence.py
+@@ -0,0 +1,72 @@
++"""Held actuation: schedules, step-size convergence and traces.
++
++Held control applies one constant force per segment between fixed switch
++times. This script answers three questions:
++
++1. Which of three braking schedules brings the mass closest to rest at the
++   origin over a 4 s horizon, and at what effort?
++2. How fast does the RK4 terminal state converge as the step shrinks? The
++   reference is the exact solution of the linear system on each segment,
++   computed with a matrix exponential (SciPy), as in validation/validate.py.
++3. What does a trace contain, and how does the position limit show up?
++
++Run: python examples/python/held_actuation_and_convergence.py
++"""
++
++import numpy as np
++from scipy.linalg import expm
++
++from robotics_control_craft import Prepared, load_example
++
++base = load_example()["model"] | {"dt_s": 0.01, "horizon_s": 4.0}
++switches = [0.5, 1.0, 2.0, 3.0]
++model = base | {"control": {"kind": "held", "switches_s": switches}}
++prepared = Prepared(model)
++schedules = {
++    "brake then hold": [-3.0, -1.0, 0.0, 0.0, 0.0],
++    "bang-bang": [-3.0, 3.0, -1.0, 0.5, 0.0],
++    "gentle": [-1.0, -0.5, 0.0, 0.25, 0.0],
++}
++print("schedule          score     terminal x (m)  terminal v (m/s)  effort (N^2 s)")
++for name, forces in schedules.items():
++    row = prepared.evaluate(forces)
++    m = row["metrics"]
++    print(f"{name:16s} {row['score']:9.6f} {m['terminal_position_m']:14.6f}"
++          f" {m['terminal_velocity_m_s']:16.6f} {m['integrated_force_squared']:14.6f}")
++
++
++def exact(model, forces):
++    """Terminal position and velocity from the segment-wise matrix exponential."""
++    state = np.array([model["initial_x_m"], model["initial_v_m_s"], 1.0])
++    times = [0.0, *model["control"]["switches_s"], model["horizon_s"]]
++    m, k, c = model["mass_kg"], model["spring_n_per_m"], model["damping_ns_per_m"]
++    for lo, hi, force in zip(times[:-1], times[1:], forces, strict=True):
++        a = np.array([[0, 1, 0], [-k / m, -c / m, force / m], [0, 0, 0]])
++        state = expm(a * (hi - lo)) @ state
++    return state[:2]
++
++
++forces = schedules["brake then hold"]
++reference = exact(model, forces)
++print(f"\nexact terminal state: x={reference[0]:.12f} m, v={reference[1]:.12f} m/s")
++print("    dt (s)   steps   max error     ratio")
++previous = None
++for dt in (0.08, 0.04, 0.02, 0.01, 0.005):
++    row = Prepared(model | {"dt_s": dt}).evaluate(forces)
++    m = row["metrics"]
++    error = float(np.max(np.abs(reference - [m["terminal_position_m"], m["terminal_velocity_m_s"]])))
++    ratio = "" if previous is None else f"{previous / error:8.2f}"
++    print(f"{dt:10.3f} {row['steps']:7d}   {error:.3e}  {ratio}")
++    previous = error
++print("halving dt divides the error by about 16, as expected for fourth order RK4")
++
++traced = Prepared(model | {"dt_s": 0.1}).evaluate(forces, trace=True)
++trace = traced["metrics"]["trace"]
++print(f"\ntrace columns {traced['metrics']['trace_columns']}, {len(trace)} rows")
++for t, x, v, f in trace[:3] + trace[-2:]:
++    print(f"t={t:6.3f}  x={x:9.6f}  v={v:9.6f}  force={f:5.2f}")
++assert {t for t, *_ in trace} >= set(switches)
++
++push = Prepared(model | {"position_limit_m": 1.2}).evaluate([3.0, 3.0, 3.0, 3.0, 3.0])
++print("\npushing outward with 3 N against a 1.2 m limit:",
++      {k: push[k] for k in ("status", "steps", "detail")})
+diff --git a/examples/python/outputs/fcmaes_bite_robust_pd.txt b/examples/python/outputs/fcmaes_bite_robust_pd.txt
+new file mode 100644
+index 0000000..6512082
+--- /dev/null
++++ b/examples/python/outputs/fcmaes_bite_robust_pd.txt
+@@ -0,0 +1,7 @@
++robust gains [12.68735, 4.0], training mean 0.661433, 1500 calls, 1816 failed rollouts penalized
++nominal gains [18.97054, 4.0], nominal score 0.624824, 475 failed rollouts penalized
++
++held-out evaluation over 32 scenarios (scores over completed rollouts)
++gains      mean score  worst score  infeasible
++robust       0.657551     0.798885           1
++nominal      0.588289     0.701216          19
+diff --git a/examples/python/outputs/fcmaes_cmaes_held_schedule.txt b/examples/python/outputs/fcmaes_cmaes_held_schedule.txt
+new file mode 100644
+index 0000000..a11e61e
+--- /dev/null
++++ b/examples/python/outputs/fcmaes_cmaes_held_schedule.txt
+@@ -0,0 +1,11 @@
++generation  25: best score 0.130989259
++generation  50: best score 0.123589665
++generation  75: best score 0.123202019
++generation 100: best score 0.123072148
++generation 125: best score 0.123058884
++generation 150: best score 0.123058854
++3600 schedules evaluated, 81 penalized
++best forces (N): [-3.0, 1.803, 1.3749, -0.123, 0.0102, 0.0036]
++replay score 0.123058854, terminal x -3.873e-04 m, v 1.468e-03 m/s, effort 7.0857 N^2 s
++hand-made brake-then-hold schedule: score 1.104367
++coarse traced replay at dt=0.1 s: 42 rows, forces in order [-3.0, 1.803, 1.3749, -0.123, 0.0102, 0.0036]
+diff --git a/examples/python/outputs/held_actuation_and_convergence.txt b/examples/python/outputs/held_actuation_and_convergence.txt
+new file mode 100644
+index 0000000..9b98a5b
+--- /dev/null
++++ b/examples/python/outputs/held_actuation_and_convergence.txt
+@@ -0,0 +1,22 @@
++schedule          score     terminal x (m)  terminal v (m/s)  effort (N^2 s)
++brake then hold   1.104367      -0.077504         1.060642       5.000000
++bang-bang         0.315276      -0.144705         0.525645      10.250000
++gentle            0.407857      -0.142781         0.561440       0.687500
++
++exact terminal state: x=-0.077504034903 m, v=1.060641812454 m/s
++    dt (s)   steps   max error     ratio
++     0.080      53   1.158e-06  
++     0.040     101   7.185e-08     16.12
++     0.020     200   4.488e-09     16.01
++     0.010     402   2.782e-10     16.13
++     0.005     803   1.742e-11     15.97
++halving dt divides the error by about 16, as expected for fourth order RK4
++
++trace columns ['t_s', 'x_m', 'v_m_s', 'held_force_n'], 41 rows
++t= 0.100  x= 0.999853  v=-0.200267  force=-3.00
++t= 0.200  x= 0.960536  v=-0.582878  force=-3.00
++t= 0.300  x= 0.883969  v=-0.944778  force=-3.00
++t= 3.900  x=-0.185149  v= 1.090593  force= 0.00
++t= 4.000  x=-0.077507  v= 1.060644  force= 0.00
++
++pushing outward with 3 N against a 1.2 m limit: {'status': 'infeasible', 'steps': 38, 'detail': 'position limit exceeded'}
+diff --git a/examples/python/outputs/parameter_sensitivity.txt b/examples/python/outputs/parameter_sensitivity.txt
+new file mode 100644
+index 0000000..e1c61d8
+--- /dev/null
++++ b/examples/python/outputs/parameter_sensitivity.txt
+@@ -0,0 +1,13 @@
++nominal score 0.235969093 with gains [8.0, 3.0], dt=0.01 s
++parameter            value   elasticity   d error/dp     d effort/dp
++mass_kg              1.000       0.6475       0.265027        7.387847
++spring_n_per_m       1.000      -0.1288      -0.059754        0.081707
++damping_ns_per_m     0.400       0.0060       0.017850       -3.348132
++force_limit_n        3.000      -0.3527      -0.058624        1.736808
++initial_x_m          1.000       2.2257       1.047917        8.222375
++initial_v_m_s        0.200       0.1270       0.293974        3.192485
++controller interval 0.050 s: score 0.236662, peak force 3.000 N
++controller interval 0.100 s: score 0.235969, peak force 3.000 N
++controller interval 0.200 s: score 0.236477, peak force 3.000 N
++gain kp: elasticity -0.0202
++gain kd: elasticity -0.0922
+diff --git a/examples/python/outputs/pd_gain_study.txt b/examples/python/outputs/pd_gain_study.txt
+new file mode 100644
+index 0000000..bf46380
+--- /dev/null
++++ b/examples/python/outputs/pd_gain_study.txt
+@@ -0,0 +1,28 @@
++model sha256: f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7
++grid rows: 357, statuses: {'complete': 357}
++steps per rollout: [62]
++
++five best gain pairs by score
++   kp     kd     score
++ 16.0   5.50  0.230627
++ 14.0   5.00  0.230648
++ 17.0   6.00  0.230660
++ 19.0   6.50  0.230726
++ 15.0   5.50  0.230752
++packaged gains [4, 2]: score 0.261834
++
++Pareto front of integrated error versus effort: 40 gain pairs
++   kp     kd   error(m^2 s)  effort(N^2 s)  peak |x| (m)
++  0.0   0.00      1.070654       0.000000  1.018773
++  2.0   2.00      0.640491       1.507964  1.005229
++  4.0   3.00      0.528042       3.183123  1.004752
++  6.0   3.50      0.487592       4.490294  1.004752
++  8.0   4.00      0.471273       5.630291  1.004752
++  9.0   3.50      0.461731       7.115050  1.004752
++ 13.0   5.00      0.457186       7.896908  1.004752
++ 17.0   6.00      0.454918       8.745706  1.004752
++
++best gains [16.0, 5.5]
++score at dt=0.04: 0.230627209 (62 steps)
++score at dt=0.02: 0.230627098 (104 steps)
++top-five ranking at half step: [0, 1, 2, 3, 4]
+diff --git a/examples/python/outputs/rust_matrix.txt b/examples/python/outputs/rust_matrix.txt
+new file mode 100644
+index 0000000..43a27db
+--- /dev/null
++++ b/examples/python/outputs/rust_matrix.txt
+@@ -0,0 +1,2 @@
++357 rows, 357 complete; best kp=16 kd=5.5 score=0.23062720947966966 steps=62
++model sha256 f272fedc71a1f36d95e7ced0fd32ad04255f1d82f2b67044a2de4e50fa9510f7
+diff --git a/examples/python/outputs/scenario_robustness.txt b/examples/python/outputs/scenario_robustness.txt
+new file mode 100644
+index 0000000..7700559
+--- /dev/null
++++ b/examples/python/outputs/scenario_robustness.txt
+@@ -0,0 +1,22 @@
++40 scenarios, mass 0.820-1.192 kg, damping 0.260-0.650 N s/m
++controller           mean      worst     std       failed
++zero gains          0.583100  0.659163  0.034959     0
++packaged            0.264000  0.299225  0.019650     0
++nominal grid best   0.233148  0.256796  0.013670     0
++soft                0.368260  0.441733  0.030968     0
++
++stress target 1.8 m, limit 2 m: infeasible rollouts out of 10 scenarios
++   kp     kd  infeasible
++  2.0    0.0           5
++  2.0    1.0           0
++  2.0    3.0           0
++  8.0    0.0          10
++  8.0    1.0          10
++  8.0    3.0           0
++ 16.0    0.0          10
++ 16.0    1.0          10
++ 16.0    3.0           0
++ 30.0    0.0          10
++ 30.0    1.0          10
++ 30.0    3.0          10
++example failure record: {'status': 'infeasible', 'steps': 41, 'score': None, 'detail': 'position limit exceeded'}
+diff --git a/examples/python/outputs/scipy_de_tuning.txt b/examples/python/outputs/scipy_de_tuning.txt
+new file mode 100644
+index 0000000..69f06d6
+--- /dev/null
++++ b/examples/python/outputs/scipy_de_tuning.txt
+@@ -0,0 +1,7 @@
++DE: best gains [79.950151, 22.961001], score 0.531785046
++DE: 1952 rows scored in 61 native calls, 29 failed rollouts penalized
++Nelder-Mead: gains [87.460109, 25.061778], score 0.531642326, 755 evaluations
++replay: status complete, steps 4030, peak position 1.779831 m (limit 2 m)
++        terminal x 1.779539 m, v -0.009384 m/s
++half-step replay score 0.531642326 (difference -2.07e-11)
++traced first second: 1000 rows, last row [1.0, 1.215101, 2.08164, 3.0]
+diff --git a/examples/python/parameter_sensitivity.py b/examples/python/parameter_sensitivity.py
+new file mode 100644
+index 0000000..7f40f25
+--- /dev/null
++++ b/examples/python/parameter_sensitivity.py
+@@ -0,0 +1,53 @@
++"""Parameter sensitivity: which plant and controller settings matter most?
++
++For a fixed PD controller this script perturbs each model parameter by +/-1%
++and reports the central-difference elasticity of the score,
++(dScore / Score) / (dParam / Param), together with the change in tracking error
++and effort. Each perturbed model is prepared once; the same candidate is scored
++on all of them. A second table repeats the analysis for the controller gains
++with `score_matrix` on the nominal model.
++
++Run: python examples/python/parameter_sensitivity.py
++"""
++
++from robotics_control_craft import Prepared, load_example
++
++case = load_example()
++model = case["model"] | {"dt_s": 0.01}
++gains = [8.0, 3.0]
++nominal = Prepared(model).evaluate(gains)
++print(f"nominal score {nominal['score']:.9f} with gains {gains}, dt={model['dt_s']} s")
++print("parameter            value   elasticity   d error/dp     d effort/dp")
++for name in ("mass_kg", "spring_n_per_m", "damping_ns_per_m", "force_limit_n",
++             "initial_x_m", "initial_v_m_s"):
++    value = model[name]
++    step = 0.01 * value
++    up = Prepared(model | {name: value + step}).evaluate(gains)
++    down = Prepared(model | {name: value - step}).evaluate(gains)
++    assert up["status"] == down["status"] == "complete", (up, down)
++    slope = (up["score"] - down["score"]) / (2 * step)
++    d_error = (up["metrics"]["integrated_error"] - down["metrics"]["integrated_error"]) / (2 * step)
++    d_effort = (up["metrics"]["integrated_force_squared"]
++                - down["metrics"]["integrated_force_squared"]) / (2 * step)
++    print(f"{name:18s} {value:7.3f} {slope * value / nominal['score']:12.4f}"
++          f" {d_error:14.6f} {d_effort:15.6f}")
++
++interval = model["control"]["interval_s"]
++for scale in (0.5, 1.0, 2.0):
++    control = {"kind": "pd", "interval_s": interval * scale}
++    row = Prepared(model | {"control": control}).evaluate(gains)
++    print(f"controller interval {control['interval_s']:.3f} s: score {row['score']:.6f},"
++          f" peak force {row['metrics']['max_abs_force_n']:.3f} N")
++
++prepared = Prepared(model)
++rows = []
++for i in range(2):
++    for sign in (1, -1):
++        g = list(gains)
++        g[i] *= 1 + sign * 0.01
++        rows.append(g)
++scores, statuses, _ = prepared.score_matrix(rows)
++assert set(statuses) == {"complete"}
++for i, name in enumerate(("kp", "kd")):
++    slope = (scores[2 * i] - scores[2 * i + 1]) / (0.02 * gains[i])
++    print(f"gain {name}: elasticity {slope * gains[i] / nominal['score']:.4f}")
+diff --git a/examples/python/pd_gain_study.py b/examples/python/pd_gain_study.py
+new file mode 100644
+index 0000000..c665ada
+--- /dev/null
++++ b/examples/python/pd_gain_study.py
+@@ -0,0 +1,68 @@
++"""PD gain study: which gains settle the oscillator with acceptable effort?
++
++The packaged example starts the mass at 1 m with 0.2 m/s and asks a sampled
++PD controller (0.1 s sample interval, 3 N saturation) to bring it to rest at
++the origin within 2.05 s. This script scores a 21 x 17 gain grid in one native
++call with `score_matrix`, then fetches full metrics for the same grid with one
++`batch` call to show the trade-off between tracking error and actuator effort.
++Finally it replays the best gains at half the integration step to check that
++the ranking is not a discretization artifact.
++
++Run: python examples/python/pd_gain_study.py
++"""
++
++import numpy as np
++
++from robotics_control_craft import Prepared, load_example
++
++case = load_example()
++model = case["model"]
++prepared = Prepared(model)
++print("model sha256:", prepared.model_sha256)
++
++kp = np.linspace(0.0, 20.0, 21)
++kd = np.linspace(0.0, 8.0, 17)
++grid = np.array([[p, d] for p in kp for d in kd])
++scores, statuses, steps = prepared.score_matrix(grid)
++scores = np.asarray(scores)
++print(f"grid rows: {len(grid)}, statuses: { {s: statuses.count(s) for s in sorted(set(statuses))} }")
++print(f"steps per rollout: {sorted(set(steps))}")
++
++order = np.argsort(scores)
++print("\nfive best gain pairs by score")
++print("   kp     kd     score")
++for i in order[:5]:
++    print(f"{grid[i, 0]:5.1f}  {grid[i, 1]:5.2f}  {scores[i]:.6f}")
++baseline = int(np.flatnonzero((grid == case["parameters"]).all(axis=1))[0])
++print(f"packaged gains {case['parameters']}: score {scores[baseline]:.6f}")
++
++# Full records carry the score terms; one batch call returns them for all rows.
++candidates = [{"id": f"kp{p:g}-kd{d:g}", "parameters": [p, d]} for p, d in grid]
++records = prepared.batch(candidates)["records"]
++error = np.array([r["metrics"]["integrated_error"] for r in records])
++effort = np.array([r["metrics"]["integrated_force_squared"] for r in records])
++assert all(r["score"] == s for r, s in zip(records, scores))
++
++# Pareto front: no other gain pair has both lower tracking error and lower effort.
++front = [
++    i for i in range(len(grid))
++    if not np.any((error < error[i]) & (effort < effort[i]))
++]
++front.sort(key=lambda i: effort[i])
++print(f"\nPareto front of integrated error versus effort: {len(front)} gain pairs")
++print("   kp     kd   error(m^2 s)  effort(N^2 s)  peak |x| (m)")
++for i in front[:: max(1, len(front) // 8)]:
++    m = records[i]["metrics"]
++    print(f"{grid[i, 0]:5.1f}  {grid[i, 1]:5.2f}  {error[i]:12.6f}  {effort[i]:13.6f}"
++          f"  {m['max_abs_position_m']:.6f}")
++
++# Refined-step replay: halve dt and keep the controller interval fixed.
++best = grid[order[0]].tolist()
++fine = Prepared(model | {"dt_s": model["dt_s"] / 2})
++coarse_row = prepared.evaluate(best)
++fine_row = fine.evaluate(best)
++print(f"\nbest gains {best}")
++print(f"score at dt={model['dt_s']}: {coarse_row['score']:.9f} ({coarse_row['steps']} steps)")
++print(f"score at dt={model['dt_s'] / 2}: {fine_row['score']:.9f} ({fine_row['steps']} steps)")
++fine_scores = np.asarray(fine.score_matrix(grid[order[:5]])[0])
++print("top-five ranking at half step:", np.argsort(fine_scores).tolist())
+diff --git a/examples/python/scenario_robustness.py b/examples/python/scenario_robustness.py
+new file mode 100644
+index 0000000..017f747
+--- /dev/null
++++ b/examples/python/scenario_robustness.py
+@@ -0,0 +1,64 @@
++"""Scenario robustness: does a tuned controller survive plant uncertainty?
++
++A controller tuned on the nominal plant may degrade when the payload mass or
++the damping differ. This script samples 40 seeded scenarios (mass within
+++/-20%, damping between 0.25 and 0.65 N s/m), prepares each scenario once and
++scores four gain pairs per scenario with one `score_matrix` call. It reports
++the mean, worst case and spread of the score, and the number of failed
++rollouts. A second study moves the target close to the position limit, where
++aggressive gains overshoot and become infeasible.
++
++Run: python examples/python/scenario_robustness.py
++"""
++
++import random
++
++import numpy as np
++
++from robotics_control_craft import Prepared, load_example
++
++case = load_example()
++nominal = case["model"]
++controllers = {
++    "zero gains": [0.0, 0.0],
++    "packaged": case["parameters"],
++    "nominal grid best": [16.0, 5.5],
++    "soft": [2.0, 1.0],
++}
++rows = list(controllers.values())
++
++rng = random.Random(2026)
++scenarios = [
++    nominal | {"mass_kg": rng.uniform(0.8, 1.2), "damping_ns_per_m": rng.uniform(0.25, 0.65)}
++    for _ in range(40)
++]
++table = []
++for scenario in scenarios:
++    scores, statuses, _ = Prepared(scenario).score_matrix(rows)
++    table.append([s if st == "complete" else np.nan for s, st in zip(scores, statuses)])
++table = np.array(table)
++
++print(f"{len(scenarios)} scenarios, mass {min(s['mass_kg'] for s in scenarios):.3f}"
++      f"-{max(s['mass_kg'] for s in scenarios):.3f} kg, damping"
++      f" {min(s['damping_ns_per_m'] for s in scenarios):.3f}"
++      f"-{max(s['damping_ns_per_m'] for s in scenarios):.3f} N s/m")
++print("controller           mean      worst     std       failed")
++for j, name in enumerate(controllers):
++    column = table[:, j]
++    ok = column[~np.isnan(column)]
++    print(f"{name:18s} {ok.mean():9.6f} {ok.max():9.6f} {ok.std():9.6f} {np.isnan(column).sum():5d}")
++
++# Stress test: target 1.8 m with the position limit at 2 m, starting at rest.
++stress = nominal | {"target_m": 1.8, "initial_x_m": 0.0, "initial_v_m_s": 0.0}
++gains = np.array([[p, d] for p in (2.0, 8.0, 16.0, 30.0) for d in (0.0, 1.0, 3.0)])
++counts = {}
++for scenario in scenarios[:10]:
++    _, statuses, _ = Prepared(stress | {k: scenario[k] for k in ("mass_kg", "damping_ns_per_m")}).score_matrix(gains)
++    for g, status in zip(map(tuple, gains), statuses):
++        counts.setdefault(g, []).append(status)
++print("\nstress target 1.8 m, limit 2 m: infeasible rollouts out of 10 scenarios")
++print("   kp     kd  infeasible")
++for g, statuses in counts.items():
++    print(f"{g[0]:5.1f}  {g[1]:5.1f}  {statuses.count('infeasible'):10d}")
++first = Prepared(stress).evaluate([30.0, 0.0])
++print("example failure record:", {k: first[k] for k in ("status", "steps", "score", "detail")})
+diff --git a/examples/python/scipy_de_tuning.py b/examples/python/scipy_de_tuning.py
+new file mode 100644
+index 0000000..ef9c372
+--- /dev/null
++++ b/examples/python/scipy_de_tuning.py
+@@ -0,0 +1,71 @@
++"""SciPy: tune PD gains near the position limit, then polish and replay.
++
++The task moves the mass from rest at 0 m to a target at 1.8 m while the
++position limit is 2 m, over 4 s with a 1 ms integration step. High
++proportional gains with little damping overshoot the limit and the rollout is
++infeasible, so the objective adds a penalty for every non-complete status.
++
++SciPy's differential evolution runs with `vectorized=True`: each generation
++arrives as one (dim, population) array and is scored with a single
++`score_matrix` call on two native workers. Nelder-Mead then polishes the
++winner with a one-row objective. The result is replayed with a trace and at
++half the step size.
++
++Run: python examples/python/scipy_de_tuning.py
++"""
++
++import numpy as np
++from scipy.optimize import differential_evolution, minimize
++
++from robotics_control_craft import Prepared, load_example
++
++model = load_example()["model"] | {
++    "dt_s": 0.001, "horizon_s": 4.0, "target_m": 1.8, "initial_x_m": 0.0, "initial_v_m_s": 0.0,
++}
++prepared = Prepared(model)
++PENALTY = 10.0
++calls = {"native": 0, "rows": 0, "failed": 0}
++
++
++def population_objective(x):
++    """x has shape (2, S); return S penalized scores."""
++    scores, statuses, _ = prepared.score_matrix(x.T, workers=2)
++    calls["native"] += 1
++    calls["rows"] += len(statuses)
++    scores = np.asarray(scores)
++    failed = np.array([s != "complete" for s in statuses])
++    calls["failed"] += int(failed.sum())
++    scores[failed] = PENALTY
++    return scores
++
++
++bounds = [(0.0, 100.0), (0.0, 30.0)]
++result = differential_evolution(
++    population_objective, bounds, seed=7, popsize=16, maxiter=60, tol=1e-10,
++    vectorized=True, updating="deferred", polish=False,
++)
++print(f"DE: best gains {np.round(result.x, 6).tolist()}, score {result.fun:.9f}")
++print(f"DE: {calls['rows']} rows scored in {calls['native']} native calls,"
++      f" {calls['failed']} failed rollouts penalized")
++
++
++def one(x):
++    return population_objective(np.asarray(x)[:, None])[0]
++
++
++polished = minimize(one, result.x, method="Nelder-Mead", bounds=bounds,
++                    options={"xatol": 1e-8, "fatol": 1e-12, "maxiter": 400})
++print(f"Nelder-Mead: gains {np.round(polished.x, 6).tolist()}, score {polished.fun:.9f},"
++      f" {polished.nfev} evaluations")
++
++best = polished.x.tolist() if polished.fun <= result.fun else result.x.tolist()
++replay = prepared.evaluate(best, trace=False)
++m = replay["metrics"]
++print(f"replay: status {replay['status']}, steps {replay['steps']},"
++      f" peak position {m['max_abs_position_m']:.6f} m (limit {model['position_limit_m']} m)")
++print(f"        terminal x {m['terminal_position_m']:.6f} m, v {m['terminal_velocity_m_s']:.6f} m/s")
++fine = Prepared(model | {"dt_s": model["dt_s"] / 2}).evaluate(best)
++print(f"half-step replay score {fine['score']:.9f} (difference {fine['score'] - replay['score']:.2e})")
++reduced = Prepared(model | {"horizon_s": 1.0}).evaluate(best, trace=True)
++print(f"traced first second: {len(reduced['metrics']['trace'])} rows,"
++      f" last row {np.round(reduced['metrics']['trace'][-1], 6).tolist()}")
+diff --git a/pyproject.toml b/pyproject.toml
+index dee69fc..dd102b8 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "maturin"
+ 
+ [project]
+ name = "robotics-control-craft"
+-version = "0.2.0"
++version = "0.3.0"
+ requires-python = ">=3.10"
+ description = "Prepared robotics-control-craft research evaluations"
+ 
+diff --git a/validation/release_checks.py b/validation/release_checks.py
+index 67d63e6..bbcd064 100644
+--- a/validation/release_checks.py
++++ b/validation/release_checks.py
+@@ -1,4 +1,9 @@
+-"""Check the installed lean API and run the Python snippets in the tutorial."""
++"""Check the installed lean and matrix APIs and run the Python snippets in the docs.
++
++Usage: release_checks.py MODULE TUTORIAL [MANUAL]. MANUAL defaults to
++user-manual.md next to the tutorial when that file exists. The blocks of each
++document run in order in one namespace.
++"""
+ 
+ import importlib
+ import json
+@@ -8,7 +13,8 @@ import re
+ import sys
+ from tempfile import TemporaryDirectory
+ 
+-module, tutorial = sys.argv[1:]
++module, tutorial, *rest = sys.argv[1:]
++manual = Path(rest[0]) if rest else Path(tutorial).with_name("user-manual.md")
+ package = importlib.import_module(module)
+ example = package.load_example()
+ prepared = package.Prepared(example["model"])
+@@ -39,7 +45,11 @@ with TemporaryDirectory() as tmp:
+     except ImportError:
+         numpy = None
+     if numpy is not None:
+-        assert prepared.score_matrix(numpy.asarray(matrix_rows)) == prepared.score_matrix(matrix_rows)
++        from_array = prepared.score_matrix(numpy.asarray(matrix_rows))
++        from_lists = prepared.score_matrix(matrix_rows)
++        assert from_array[1:] == from_lists[1:]
++        assert all(a == b or (math.isnan(a) and math.isnan(b))
++                   for a, b in zip(from_array[0], from_lists[0], strict=True))
+     try:
+         prepared.score_matrix([base, base + [1.0]])
+     except ValueError:
+@@ -78,10 +88,19 @@ except ValueError:
+ else:
+     raise AssertionError("scores accepted a traced candidate")
+ 
+-snippets = re.findall(r"^```python\n(.*?)^```", Path(tutorial).read_text(), re.M | re.S)
+-assert len(snippets) >= 4
+-namespace = {}
+-for i, snippet in enumerate(snippets, 1):
+-    exec(compile(snippet, f"tutorial-{i}", "exec"), namespace)
+-print(json.dumps({"status": "passed", "tutorial_python_blocks": len(snippets),
+-                  "lean_api_and_budget_parity": True, "matrix_api_parity": True}))
++def run_blocks(path, name):
++    snippets = re.findall(r"^```python\n(.*?)^```", Path(path).read_text(), re.M | re.S)
++    namespace = {}
++    for i, snippet in enumerate(snippets, 1):
++        exec(compile(snippet, f"{name}-{i}", "exec"), namespace)
++    return len(snippets)
++
++
++tutorial_blocks = run_blocks(tutorial, "tutorial")
++assert tutorial_blocks >= 4
++report = {"status": "passed", "tutorial_python_blocks": tutorial_blocks,
++          "lean_api_and_budget_parity": True, "matrix_api_parity": True}
++if manual.exists():
++    report["manual_python_blocks"] = run_blocks(manual, "manual")
++    assert report["manual_python_blocks"] >= 20
++print(json.dumps(report))
+-- 
+2.43.0
+

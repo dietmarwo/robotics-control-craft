@@ -1,0 +1,222 @@
+From 2b9ddff082cefc6b58c184ec4932b91b98019a6c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 11:51:27 -0400
+Subject: [PATCH 05/13] Round 5: Serialize traces directly from typed rows
+
+Store the trace as Option<Vec<[f64; 4]>> in the typed metrics and
+serialize it directly instead of building a serde_json::Value tree of
+arrays. Reserve the trace for the expected step count, capped at the
+10,000-row trace limit. A unit test checks the limit (10,001 steps,
+invalid, at dt 1e-4) and that a short trace has one row per step and
+ends at the horizon.
+
+Workload: trace (12 traced full records, 62 steps each, one worker).
+Before median: 0.2343 ms. After median: 0.1047 ms. Speedup: 2.24x.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ evidence/performance-0.3.0/plan.md            | 15 ++++++++
+ evidence/performance-0.3.0/round05-trace.json | 38 +++++++++++++++++++
+ src/domain.rs                                 | 27 ++++++++++---
+ src/lib.rs                                    | 37 ++++++++++++++++++
+ 4 files changed, 111 insertions(+), 6 deletions(-)
+ create mode 100644 evidence/performance-0.3.0/round05-trace.json
+
+diff --git a/evidence/performance-0.3.0/plan.md b/evidence/performance-0.3.0/plan.md
+index d7c7dd7..dc95e6a 100644
+--- a/evidence/performance-0.3.0/plan.md
++++ b/evidence/performance-0.3.0/plan.md
+@@ -97,3 +97,18 @@ check passes. Otherwise revert it and record it under `rejected/`.
+   and the full domain workloads.
+ - Floating-point results: unchanged (same kernel; serde_json formats the
+   same `f64` values with the same formatter).
++
++### Round 5: typed trace output
++
++- Target workload: `trace` (12 traced full records, 62 steps each, one
++  worker), round 4 binary before, round 5 binary after, full mode.
++- Profile after round 3 (`trace`, callgrind): float formatting 24%,
++  `Value` serialization 13%, allocation and free about 12%, `Value` drop
++  6%, `to_value` of trace rows 5%, the scalar kernel 8%.
++- Change: store the trace as `Option<Vec<[f64; 4]>>` in `Metrics` and
++  serialize it directly, instead of converting it into a `Value` tree of
++  arrays. Reserve the trace vector for the expected step count (capped
++  at the 10,000-step trace limit) to avoid repeated growth.
++- Expected effect: 1.3x to 1.6x on `trace` (float formatting remains).
++- Floating-point results: unchanged; the same `f64` values go through
++  the same formatter.
+diff --git a/evidence/performance-0.3.0/round05-trace.json b/evidence/performance-0.3.0/round05-trace.json
+new file mode 100644
+index 0000000..3cb72ca
+--- /dev/null
++++ b/evidence/performance-0.3.0/round05-trace.json
+@@ -0,0 +1,38 @@
++{
++  "workload": "trace",
++  "modes": [
++    "full",
++    "full"
++  ],
++  "before_seconds": [
++    0.000237598,
++    0.00023290783333333333,
++    0.0002363505,
++    0.00027184299999999997,
++    0.00023652099999999998,
++    0.00025010316666666663,
++    0.00023432733333333334,
++    0.00021423816666666666,
++    0.00022313849999999998,
++    0.00021681483333333332,
++    0.00021637649999999998
++  ],
++  "after_seconds": [
++    9.996783333333334e-05,
++    0.00010377383333333333,
++    0.00010271850000000001,
++    0.0001046665,
++    0.000108617,
++    9.931350000000001e-05,
++    0.00010900783333333334,
++    0.000104665,
++    0.00011862,
++    9.655433333333333e-05,
++    0.00010866450000000001
++  ],
++  "medians_seconds": [
++    0.00023432733333333334,
++    0.000104665
++  ],
++  "speedup": 2.2388318285323017
++}
+diff --git a/src/domain.rs b/src/domain.rs
+index fbfef71..d5dcafd 100644
+--- a/src/domain.rs
++++ b/src/domain.rs
+@@ -1,6 +1,5 @@
+ use crate::{Evaluation, Failure, Work, infeasible, invalid};
+ use serde::{Deserialize, Serialize};
+-use serde_json::{Value, json};
+ pub const CAPABILITIES: &[&str] = &[
+     "bounded_mass_spring_damper",
+     "piecewise_constant_actuation",
+@@ -18,10 +17,13 @@ pub struct Metrics {
+     max_abs_position_m: f64,
+     terminal_position_m: f64,
+     terminal_velocity_m_s: f64,
+-    trace: Value,
++    trace: Option<Vec<[f64; 4]>>,
+     trace_columns: [&'static str; 4],
+ }
+ 
++/// Most trace rows a traced candidate may produce.
++const TRACE_LIMIT: usize = 10_000;
++
+ const TRACE_COLUMNS: [&str; 4] = ["t_s", "x_m", "v_m_s", "held_force_n"];
+ 
+ #[derive(Deserialize)]
+@@ -293,7 +295,7 @@ fn lanes(
+                 max_abs_position_m: max_abs_x[l],
+                 terminal_position_m: x[l],
+                 terminal_velocity_m_s: v[l],
+-                trace: Value::Null,
++                trace: None,
+                 trace_columns: TRACE_COLUMNS,
+             });
+             (Ok((score, metrics)), work.used)
+@@ -301,12 +303,25 @@ fn lanes(
+     })
+ }
+ 
++/// Upper estimate of a rollout's steps: grid steps plus one per control boundary.
++fn expected_steps(m: &Model) -> usize {
++    let boundaries = match &m.control {
++        Control::Held { switches_s } => switches_s.len() as f64,
++        Control::Pd { interval_s } => m.horizon_s / interval_s,
++    };
++    (m.horizon_s / m.dt_s + boundaries + 2.0) as usize
++}
++
+ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'_>) -> Evaluation {
+     let fmax = m.force_limit_n;
+     let mut t = 0.0_f64;
+     let mut y = [m.initial_x_m, m.initial_v_m_s, 0.0];
+     let mut effort = 0.0_f64;
+-    let mut trace = Vec::new();
++    let mut trace = if TRACE {
++        Vec::with_capacity(expected_steps(m).min(TRACE_LIMIT))
++    } else {
++        Vec::new()
++    };
+     let mut max_abs_x = y[0].abs();
+     let mut max_force = 0.0_f64;
+     let mut segment = 0usize;
+@@ -355,7 +370,7 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
+             if max_abs_x > m.position_limit_m {
+                 return Err(infeasible("position limit exceeded"));
+             }
+-            if TRACE && trace.len() == 10_000 {
++            if TRACE && trace.len() == TRACE_LIMIT {
+                 return Err(invalid("trace requires at most 10,000 integration steps"));
+             }
+             if TRACE {
+@@ -374,7 +389,7 @@ fn integrate<const TRACE: bool>(m: &Model, parameters: &[f64], work: &mut Work<'
+             max_abs_position_m: max_abs_x,
+             terminal_position_m: y[0],
+             terminal_velocity_m_s: y[1],
+-            trace: json!(TRACE.then_some(trace)),
++            trace: TRACE.then_some(trace),
+             trace_columns: TRACE_COLUMNS,
+         }),
+     ))
+diff --git a/src/lib.rs b/src/lib.rs
+index 4b644bb..82e71f5 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -870,6 +870,43 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn traced_rollouts_stop_after_the_trace_limit() {
++        let example = fixture();
++        let mut model = example["model"].clone();
++        model["dt_s"] = json!(1e-4);
++        let prepared = Prepared::new(&model.to_string()).unwrap();
++        let rows = json!([
++            {"id": "traced", "parameters": example["parameters"], "trace": true},
++            {"id": "untraced", "parameters": example["parameters"]},
++        ]);
++        let out: Value =
++            serde_json::from_str(&prepared.evaluate_json(&rows.to_string(), "{}").unwrap())
++                .unwrap();
++        let traced = &out["records"][0];
++        assert_eq!(traced["status"], "invalid");
++        assert_eq!(traced["steps"], 10_001);
++        assert_eq!(
++            traced["detail"],
++            "trace requires at most 10,000 integration steps"
++        );
++        assert_eq!(out["records"][1]["status"], "complete");
++        let short = json!([{"id": "t", "parameters": example["parameters"], "trace": true}]);
++        let out: Value = serde_json::from_str(
++            &Prepared::new(&example["model"].to_string())
++                .unwrap()
++                .evaluate_json(&short.to_string(), "{}")
++                .unwrap(),
++        )
++        .unwrap();
++        let trace = out["records"][0]["metrics"]["trace"].as_array().unwrap();
++        assert_eq!(
++            trace.len() as u64,
++            out["records"][0]["steps"].as_u64().unwrap()
++        );
++        assert_eq!(trace.last().unwrap()[0], example["model"]["horizon_s"]);
++    }
++
+     #[test]
+     fn score_matrix_rejects_bad_shapes_and_budgets() {
+         let example = fixture();
+-- 
+2.43.0
+
