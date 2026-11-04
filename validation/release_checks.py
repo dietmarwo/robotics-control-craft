@@ -1,4 +1,9 @@
-"""Check the installed lean API and run the Python snippets in the tutorial."""
+"""Check the installed lean and matrix APIs and run the Python snippets in the docs.
+
+Usage: release_checks.py MODULE TUTORIAL [MANUAL]. MANUAL defaults to
+user-manual.md next to the tutorial when that file exists. The blocks of each
+document run in order in one namespace.
+"""
 
 import importlib
 import json
@@ -8,7 +13,8 @@ import re
 import sys
 from tempfile import TemporaryDirectory
 
-module, tutorial = sys.argv[1:]
+module, tutorial, *rest = sys.argv[1:]
+manual = Path(rest[0]) if rest else Path(tutorial).with_name("user-manual.md")
 package = importlib.import_module(module)
 example = package.load_example()
 prepared = package.Prepared(example["model"])
@@ -39,7 +45,11 @@ with TemporaryDirectory() as tmp:
     except ImportError:
         numpy = None
     if numpy is not None:
-        assert prepared.score_matrix(numpy.asarray(matrix_rows)) == prepared.score_matrix(matrix_rows)
+        from_array = prepared.score_matrix(numpy.asarray(matrix_rows))
+        from_lists = prepared.score_matrix(matrix_rows)
+        assert from_array[1:] == from_lists[1:]
+        assert all(a == b or (math.isnan(a) and math.isnan(b))
+                   for a, b in zip(from_array[0], from_lists[0], strict=True))
     try:
         prepared.score_matrix([base, base + [1.0]])
     except ValueError:
@@ -78,10 +88,19 @@ except ValueError:
 else:
     raise AssertionError("scores accepted a traced candidate")
 
-snippets = re.findall(r"^```python\n(.*?)^```", Path(tutorial).read_text(), re.M | re.S)
-assert len(snippets) >= 4
-namespace = {}
-for i, snippet in enumerate(snippets, 1):
-    exec(compile(snippet, f"tutorial-{i}", "exec"), namespace)
-print(json.dumps({"status": "passed", "tutorial_python_blocks": len(snippets),
-                  "lean_api_and_budget_parity": True, "matrix_api_parity": True}))
+def run_blocks(path, name):
+    snippets = re.findall(r"^```python\n(.*?)^```", Path(path).read_text(), re.M | re.S)
+    namespace = {}
+    for i, snippet in enumerate(snippets, 1):
+        exec(compile(snippet, f"{name}-{i}", "exec"), namespace)
+    return len(snippets)
+
+
+tutorial_blocks = run_blocks(tutorial, "tutorial")
+assert tutorial_blocks >= 4
+report = {"status": "passed", "tutorial_python_blocks": tutorial_blocks,
+          "lean_api_and_budget_parity": True, "matrix_api_parity": True}
+if manual.exists():
+    report["manual_python_blocks"] = run_blocks(manual, "manual")
+    assert report["manual_python_blocks"] >= 20
+print(json.dumps(report))

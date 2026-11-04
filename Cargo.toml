@@ -1,10 +1,31 @@
 [package]
 name = "robotics-control-craft"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Bounded robotics-control-craft research evaluator"
 license = "MIT"
+# Package sources, docs, models, validation scripts and the release evidence
+# that the source distribution has always carried; not the build artifacts,
+# patch series or performance evidence of the release ZIP.
+include = [
+    "/.gitignore",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/src/**/*.rs",
+    "/examples/*.rs",
+    "/models/*.json",
+    "/python/**/*.py",
+    "/python/**/*.json",
+    "/docs/*.md",
+    "/validation/*.py",
+    "/evidence/installed.json",
+    "/evidence/native-sweep.json",
+    "/evidence/scipy-search.json",
+    "/evidence/validation.json",
+]
 
 [lib]
 crate-type = ["rlib", "cdylib"]

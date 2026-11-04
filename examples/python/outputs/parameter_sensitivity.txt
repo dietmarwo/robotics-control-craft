@@ -1,0 +1,13 @@
+nominal score 0.235969093 with gains [8.0, 3.0], dt=0.01 s
+parameter            value   elasticity   d error/dp     d effort/dp
+mass_kg              1.000       0.6475       0.265027        7.387847
+spring_n_per_m       1.000      -0.1288      -0.059754        0.081707
+damping_ns_per_m     0.400       0.0060       0.017850       -3.348132
+force_limit_n        3.000      -0.3527      -0.058624        1.736808
+initial_x_m          1.000       2.2257       1.047917        8.222375
+initial_v_m_s        0.200       0.1270       0.293974        3.192485
+controller interval 0.050 s: score 0.236662, peak force 3.000 N
+controller interval 0.100 s: score 0.235969, peak force 3.000 N
+controller interval 0.200 s: score 0.236477, peak force 3.000 N
+gain kp: elasticity -0.0202
+gain kd: elasticity -0.0922

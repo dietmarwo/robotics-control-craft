@@ -1,17 +1,22 @@
-# robotics-control-craft 0.2.0
+# robotics-control-craft 0.3.0
 
 A bounded research evaluator. See the [model card](docs/model.md) for units,
-equations and supported behavior. The accompanying implementation log
-records which milestones ran and which use a bounded fallback.
-See the [tutorial](docs/tutorial.md) and [architecture](docs/architecture.md).
-The [0.1.0 implementation record](docs/implementation-0.1.0.md) preserves the original scope.
+equations and supported behavior and the [user manual](docs/user-manual.md)
+for the complete model and API reference with runnable examples. The
+[tutorial](docs/tutorial.md) is a short walk-through, the
+[architecture guide](docs/architecture.md) describes data flow and measured
+performance, and [`examples/python/`](examples/python/README.md) contains
+application and optimization scripts with recorded outputs. The
+[0.1.0 implementation record](docs/implementation-0.1.0.md) preserves the
+original scope; the performance logs record the 0.2.0 and 0.3.0 changes.
 
-## Rust CLI and native example
+## Rust CLI and native examples
 
 ```sh
 cargo run --release --locked -- describe
 cargo run --release --locked -- run models/request.json
 cargo run --release --locked --example sweep -- models/example.json
+cargo run --release --locked --example matrix -- models/example.json
 ```
 
 The CLI uses versioned JSON with exact model-byte SHA-256, candidate IDs and
@@ -33,10 +38,15 @@ prepared = Prepared(case["model"])
 row = prepared.evaluate(case["parameters"], trace=True)
 assert row["status"] == "complete"
 print(row["score"])
+scores, statuses, steps = prepared.score_matrix([[4, 2], [16, 5.5]])
+print(scores, statuses, steps)
 ```
 
-`Prepared.batch` crosses into native code once per batch. A set of scoped
-workers evaluates candidates in isolation and returns records in input order.
+`Prepared.batch` and `Prepared.scores` cross into native code once per
+batch with JSON candidates and records. `Prepared.score_matrix` takes a
+numeric matrix and returns scores, statuses and steps without JSON, which
+suits optimizers. Untraced candidates are integrated in lockstep vector
+lanes; results are identical for every API, worker count and kernel.
 The local Python campaign commits results to SQLite, preserves interrupted
 attempts and reuses completed records by candidate, scenario, settings and
 build identity. Fixed-work replay is scoped to the tested build.
@@ -53,7 +63,7 @@ maturin sdist --out dist
 maturin build --release --locked --out dist
 ```
 
-Independent numerical scripts use Python 3.12. The oscillator and population
-oracles use NumPy 2.3.5 and SciPy 1.17.0. The optional
+Independent numerical scripts use Python 3.12. The oscillator oracle uses
+NumPy 2.3.5 and SciPy 1.17.0. The optional
 `validation/optimize.py robotics_control_craft` demonstrates an in-process SciPy DE objective.
-The native sweep needs only the Rust crate. See `evidence/` for actual runs.
+The native examples need only the Rust crate. See `evidence/` for actual runs.

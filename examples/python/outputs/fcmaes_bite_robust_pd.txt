@@ -1,0 +1,7 @@
+robust gains [12.68735, 4.0], training mean 0.661433, 1500 calls, 1816 failed rollouts penalized
+nominal gains [18.97054, 4.0], nominal score 0.624824, 475 failed rollouts penalized
+
+held-out evaluation over 32 scenarios (scores over completed rollouts)
+gains      mean score  worst score  infeasible
+robust       0.657551     0.798885           1
+nominal      0.588289     0.701216          19

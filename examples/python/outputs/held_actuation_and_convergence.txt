@@ -1,0 +1,22 @@
+schedule          score     terminal x (m)  terminal v (m/s)  effort (N^2 s)
+brake then hold   1.104367      -0.077504         1.060642       5.000000
+bang-bang         0.315276      -0.144705         0.525645      10.250000
+gentle            0.407857      -0.142781         0.561440       0.687500
+
+exact terminal state: x=-0.077504034903 m, v=1.060641812454 m/s
+    dt (s)   steps   max error     ratio
+     0.080      53   1.158e-06  
+     0.040     101   7.185e-08     16.12
+     0.020     200   4.488e-09     16.01
+     0.010     402   2.782e-10     16.13
+     0.005     803   1.742e-11     15.97
+halving dt divides the error by about 16, as expected for fourth order RK4
+
+trace columns ['t_s', 'x_m', 'v_m_s', 'held_force_n'], 41 rows
+t= 0.100  x= 0.999853  v=-0.200267  force=-3.00
+t= 0.200  x= 0.960536  v=-0.582878  force=-3.00
+t= 0.300  x= 0.883969  v=-0.944778  force=-3.00
+t= 3.900  x=-0.185149  v= 1.090593  force= 0.00
+t= 4.000  x=-0.077507  v= 1.060644  force= 0.00
+
+pushing outward with 3 N against a 1.2 m limit: {'status': 'infeasible', 'steps': 38, 'detail': 'position limit exceeded'}

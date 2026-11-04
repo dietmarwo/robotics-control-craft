@@ -1,0 +1,22 @@
+40 scenarios, mass 0.820-1.192 kg, damping 0.260-0.650 N s/m
+controller           mean      worst     std       failed
+zero gains          0.583100  0.659163  0.034959     0
+packaged            0.264000  0.299225  0.019650     0
+nominal grid best   0.233148  0.256796  0.013670     0
+soft                0.368260  0.441733  0.030968     0
+
+stress target 1.8 m, limit 2 m: infeasible rollouts out of 10 scenarios
+   kp     kd  infeasible
+  2.0    0.0           5
+  2.0    1.0           0
+  2.0    3.0           0
+  8.0    0.0          10
+  8.0    1.0          10
+  8.0    3.0           0
+ 16.0    0.0          10
+ 16.0    1.0          10
+ 16.0    3.0           0
+ 30.0    0.0          10
+ 30.0    1.0          10
+ 30.0    3.0          10
+example failure record: {'status': 'infeasible', 'steps': 41, 'score': None, 'detail': 'position limit exceeded'}

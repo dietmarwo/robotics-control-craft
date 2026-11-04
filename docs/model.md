@@ -1,7 +1,7 @@
 # Bounded oscillator model
 
 The native evaluator integrates a one-dimensional mass–spring–damper.
-The state is position in metres and velocity in metres per second.
+The state is position in meters and velocity in meters per second.
 Acceleration is force minus spring and damper forces, divided by mass.
 Time is in seconds and input force is in newtons.
 
