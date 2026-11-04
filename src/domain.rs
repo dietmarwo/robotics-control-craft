@@ -1,4 +1,4 @@
-use crate::{Candidate, Evaluation, Work, infeasible, invalid};
+use crate::{Evaluation, Work, infeasible, invalid};
 use serde::Deserialize;
 use serde_json::json;
 pub const CAPABILITIES: &[&str] = &[
@@ -71,19 +71,17 @@ pub fn prepare(mut model: Model) -> Result<Model, String> {
     Ok(model)
 }
 
-pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
+pub fn evaluate(m: &Model, parameters: &[f64], trace: bool, work: &mut Work<'_>) -> Evaluation {
     let fmax = m.force_limit_n;
     match &m.control {
         Control::Held { switches_s }
-            if c.parameters.len() != switches_s.len() + 1
-                || c.parameters
-                    .iter()
-                    .any(|v| v.abs() > fmax || !v.is_finite()) =>
+            if parameters.len() != switches_s.len() + 1
+                || parameters.iter().any(|v| v.abs() > fmax || !v.is_finite()) =>
         {
             return Err(invalid("one force within limits per held-control segment"));
         }
         Control::Pd { .. }
-            if c.parameters.len() != 2 || c.parameters.iter().any(|v| !(0.0..=1e5).contains(v)) =>
+            if parameters.len() != 2 || parameters.iter().any(|v| !(0.0..=1e5).contains(v)) =>
         {
             return Err(invalid(
                 "expected nonnegative proportional and derivative gains",
@@ -91,10 +89,10 @@ pub fn evaluate(m: &Model, c: &Candidate, work: &mut Work<'_>) -> Evaluation {
         }
         _ => {}
     }
-    if c.trace {
-        integrate::<true>(m, &c.parameters, work)
+    if trace {
+        integrate::<true>(m, parameters, work)
     } else {
-        integrate::<false>(m, &c.parameters, work)
+        integrate::<false>(m, parameters, work)
     }
 }
 

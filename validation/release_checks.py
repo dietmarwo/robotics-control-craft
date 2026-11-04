@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -23,6 +24,28 @@ with TemporaryDirectory() as tmp:
         assert lean["records"] == [r | {"metrics": None} for r in full["records"]]
         if "cancel_file" in budget:
             assert lean["records"][0]["status"] == "cancelled"
+    base = example["parameters"]
+    matrix_rows = [base, [1e9] * len(base), [x * 1.1 for x in base]]
+    matrix_candidates = [{"id": f"row-{i}", "parameters": r} for i, r in enumerate(matrix_rows)]
+    for budget in ({}, {"workers": 4}, {"max_steps": 1}, {"cancel_file": str(flag)}):
+        lean = prepared.scores(matrix_candidates, **budget)["records"]
+        scores, statuses, steps = prepared.score_matrix(matrix_rows, **budget)
+        assert statuses == [r["status"] for r in lean], (budget, statuses)
+        assert steps == [r["steps"] for r in lean], (budget, steps)
+        for value, record in zip(scores, lean, strict=True):
+            assert math.isnan(value) if record["score"] is None else value == record["score"]
+    try:
+        import numpy
+    except ImportError:
+        numpy = None
+    if numpy is not None:
+        assert prepared.score_matrix(numpy.asarray(matrix_rows)) == prepared.score_matrix(matrix_rows)
+    try:
+        prepared.score_matrix([base, base + [1.0]])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("score_matrix accepted ragged rows")
     if module == "population_epidemiology":
         calendar = package.Prepared({"kind": "calendar", "initial_on_probability": 0.5,
                                      "segments": [{"duration": 1, "on_rate": 0, "off_rate": 0}] * 3})
@@ -61,4 +84,4 @@ namespace = {}
 for i, snippet in enumerate(snippets, 1):
     exec(compile(snippet, f"tutorial-{i}", "exec"), namespace)
 print(json.dumps({"status": "passed", "tutorial_python_blocks": len(snippets),
-                  "lean_api_and_budget_parity": True}))
+                  "lean_api_and_budget_parity": True, "matrix_api_parity": True}))

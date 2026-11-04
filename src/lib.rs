@@ -142,6 +142,17 @@ struct Batch<'a> {
     version: &'static str,
 }
 
+/// One untraced candidate's outcome from `Prepared::score_matrix`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatrixScore {
+    /// Same status strings as the JSON records.
+    pub status: &'static str,
+    /// Logical domain steps charged to the candidate.
+    pub steps: u64,
+    /// Objective value; `Some` only for `"complete"`.
+    pub score: Option<f64>,
+}
+
 pub struct Prepared {
     model: domain::Model,
     model_sha256: String,
@@ -154,6 +165,11 @@ impl Prepared {
             model,
             model_sha256,
         })
+    }
+
+    /// SHA-256 of the exact model bytes passed to `Prepared::new`.
+    pub fn model_sha256(&self) -> &str {
+        &self.model_sha256
     }
 
     pub fn evaluate_json(&self, candidates: &str, budget: &str) -> Result<String, String> {
@@ -174,6 +190,47 @@ impl Prepared {
         self.evaluate_encoded(candidates, budget, false)
     }
 
+    /// Evaluate `rows` untraced candidates whose parameters are stored row-major in
+    /// `parameters`. Each row has `parameters.len() / rows` values; dimension 0 is
+    /// allowed. Budget JSON, limits, worker dispatch, deadlines, cancellation and
+    /// failure classification are the same as `scores_json`.
+    pub fn score_matrix(
+        &self,
+        rows: usize,
+        parameters: &[f64],
+        budget: &str,
+    ) -> Result<Vec<MatrixScore>, String> {
+        if !(1..=4096).contains(&rows) {
+            return Err("matrix rows must be between 1 and 4096".into());
+        }
+        if !parameters.len().is_multiple_of(rows) {
+            return Err("parameter matrix length is not a multiple of rows".into());
+        }
+        let dimension = parameters.len() / rows;
+        if dimension > 64 {
+            return Err("parameter vector exceeds limit".into());
+        }
+        let budget: Budget = serde_json::from_str(budget).map_err(|e| e.to_string())?;
+        check_budget(&budget, rows)?;
+        let deadline = deadline(&budget);
+        Ok(self.dispatch(rows, budget.workers, |index| {
+            let row = &parameters[index * dimension..(index + 1) * dimension];
+            let (result, steps) = self.outcome(row, false, &budget, deadline, false);
+            match result {
+                Ok((score, _)) => MatrixScore {
+                    status: "complete",
+                    steps,
+                    score: Some(score),
+                },
+                Err(e) => MatrixScore {
+                    status: e.status,
+                    steps,
+                    score: None,
+                },
+            }
+        }))
+    }
+
     fn evaluate_encoded(
         &self,
         candidates: Vec<Candidate>,
@@ -184,13 +241,15 @@ impl Prepared {
             .map_err(|e| e.to_string())
     }
 
-    fn record<'a>(
+    /// Run one candidate's domain evaluation and return its classified result and steps.
+    fn outcome(
         &self,
-        c: &'a Candidate,
+        parameters: &[f64],
+        trace: bool,
         budget: &Budget,
         deadline: Option<Instant>,
         metrics_enabled: bool,
-    ) -> Record<'a> {
+    ) -> (Evaluation, u64) {
         let mut work = Work {
             budget,
             deadline,
@@ -198,7 +257,7 @@ impl Prepared {
             metrics_enabled,
             monitored: deadline.is_some() || budget.cancel_file.is_some(),
         };
-        let result = domain::evaluate(&self.model, c, &mut work);
+        let result = domain::evaluate(&self.model, parameters, trace, &mut work);
         let result = result.and_then(|(score, metrics)| {
             if score.is_finite() {
                 Ok((score, metrics))
@@ -206,11 +265,23 @@ impl Prepared {
                 Err(invalid("nonfinite objective"))
             }
         });
+        (result, work.used)
+    }
+
+    fn record<'a>(
+        &self,
+        c: &'a Candidate,
+        budget: &Budget,
+        deadline: Option<Instant>,
+        metrics_enabled: bool,
+    ) -> Record<'a> {
+        let (result, steps) =
+            self.outcome(&c.parameters, c.trace, budget, deadline, metrics_enabled);
         match result {
             Ok((score, metrics)) => Record {
                 id: &c.id,
                 status: "complete",
-                steps: work.used,
+                steps,
                 score: Some(score),
                 metrics: Some(metrics),
                 detail: None,
@@ -218,12 +289,46 @@ impl Prepared {
             Err(e) => Record {
                 id: &c.id,
                 status: e.status,
-                steps: work.used,
+                steps,
                 score: None,
                 metrics: if metrics_enabled { e.metrics } else { None },
                 detail: Some(e.detail),
             },
         }
+    }
+
+    /// Produce one item per index, inline or on scoped workers, in index order.
+    fn dispatch<T: Send + Sync>(
+        &self,
+        count: usize,
+        workers: usize,
+        item: impl Fn(usize) -> T + Sync,
+    ) -> Vec<T> {
+        if workers == 1 || count == 1 {
+            return (0..count).map(item).collect();
+        }
+        let next = AtomicUsize::new(0);
+        let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
+        std::thread::scope(|scope| {
+            for _ in 0..workers.min(count) {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        if index >= count {
+                            break;
+                        }
+                        assert!(
+                            slots[index].set(item(index)).is_ok(),
+                            "duplicate work index"
+                        );
+                    }
+                });
+            }
+        });
+        slots
+            .into_iter()
+            .map(|slot| slot.into_inner().expect("missing evaluation"))
+            .collect()
     }
 
     fn evaluate<'a>(
@@ -232,14 +337,7 @@ impl Prepared {
         budget: Budget,
         metrics_enabled: bool,
     ) -> Result<Batch<'a>, String> {
-        if !(1..=64).contains(&budget.workers)
-            || !(1..=100_000_000).contains(&budget.max_steps)
-            || budget.wall_ms.is_some_and(|n| n == 0 || n > 86_400_000)
-            || candidates.is_empty()
-            || candidates.len() > 4096
-        {
-            return Err("invalid budget or batch size".into());
-        }
+        check_budget(&budget, candidates.len())?;
         let mut seen = HashSet::with_capacity(candidates.len());
         for c in candidates {
             if c.id.is_empty() || c.id.len() > 128 || !seen.insert(&c.id) || c.parameters.len() > 64
@@ -252,36 +350,10 @@ impl Prepared {
         if candidates.iter().filter(|c| c.trace).count() > 16 {
             return Err("at most 16 traced candidates per batch".into());
         }
-        let deadline = budget
-            .wall_ms
-            .map(|n| Instant::now() + Duration::from_millis(n));
-        let records: Vec<_> = if budget.workers == 1 || candidates.len() == 1 {
-            candidates
-                .iter()
-                .map(|c| self.record(c, &budget, deadline, metrics_enabled))
-                .collect()
-        } else {
-            let next = AtomicUsize::new(0);
-            let slots: Vec<_> = (0..candidates.len()).map(|_| OnceLock::new()).collect();
-            std::thread::scope(|scope| {
-                for _ in 0..budget.workers.min(candidates.len()) {
-                    scope.spawn(|| {
-                        loop {
-                            let index = next.fetch_add(1, Ordering::Relaxed);
-                            let Some(c) = candidates.get(index) else {
-                                break;
-                            };
-                            let record = self.record(c, &budget, deadline, metrics_enabled);
-                            assert!(slots[index].set(record).is_ok(), "duplicate work index");
-                        }
-                    });
-                }
-            });
-            slots
-                .into_iter()
-                .map(|slot| slot.into_inner().expect("missing evaluation"))
-                .collect()
-        };
+        let deadline = deadline(&budget);
+        let records = self.dispatch(candidates.len(), budget.workers, |index| {
+            self.record(&candidates[index], &budget, deadline, metrics_enabled)
+        });
         Ok(Batch {
             model_sha256: &self.model_sha256,
             records,
@@ -289,6 +361,24 @@ impl Prepared {
             version: env!("CARGO_PKG_VERSION"),
         })
     }
+}
+
+fn check_budget(budget: &Budget, count: usize) -> Result<(), String> {
+    if !(1..=64).contains(&budget.workers)
+        || !(1..=100_000_000).contains(&budget.max_steps)
+        || budget.wall_ms.is_some_and(|n| n == 0 || n > 86_400_000)
+        || count == 0
+        || count > 4096
+    {
+        return Err("invalid budget or batch size".into());
+    }
+    Ok(())
+}
+
+fn deadline(budget: &Budget) -> Option<Instant> {
+    budget
+        .wall_ms
+        .map(|n| Instant::now() + Duration::from_millis(n))
 }
 
 #[derive(Deserialize)]
@@ -340,6 +430,39 @@ mod python {
         fn batch(&self, py: Python<'_>, candidates: String, budget: String) -> PyResult<String> {
             py.detach(|| self.0.evaluate_json(&candidates, &budget))
                 .map_err(PyValueError::new_err)
+        }
+        /// Score untraced rows; returns (scores, statuses, steps) with NaN scores
+        /// for every non-complete row.
+        fn score_matrix(
+            &self,
+            py: Python<'_>,
+            rows: Vec<Vec<f64>>,
+            budget: String,
+        ) -> PyResult<(Vec<f64>, Vec<&'static str>, Vec<u64>)> {
+            let dimension = rows.first().map_or(0, Vec::len);
+            if rows.iter().any(|row| row.len() != dimension) {
+                return Err(PyValueError::new_err(
+                    "parameter rows must all have the same length",
+                ));
+            }
+            let parameters = rows.concat();
+            let count = rows.len();
+            let scores = py
+                .detach(|| self.0.score_matrix(count, &parameters, &budget))
+                .map_err(PyValueError::new_err)?;
+            let mut values = Vec::with_capacity(scores.len());
+            let mut statuses = Vec::with_capacity(scores.len());
+            let mut steps = Vec::with_capacity(scores.len());
+            for row in scores {
+                values.push(row.score.unwrap_or(f64::NAN));
+                statuses.push(row.status);
+                steps.push(row.steps);
+            }
+            Ok((values, statuses, steps))
+        }
+        #[getter]
+        fn model_sha256(&self) -> &str {
+            self.0.model_sha256()
         }
     }
 
@@ -400,6 +523,120 @@ mod tests {
         }
         candidates[0]["trace"] = json!(true);
         assert!(prepared.scores_json(&candidates.to_string(), "{}").is_err());
+    }
+
+    /// Check that every matrix row reproduces the lean JSON status, steps and score bits.
+    fn assert_matrix_matches_scores(prepared: &Prepared, rows: &[Vec<f64>], budget: &str) {
+        let candidates: Vec<Value> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, p)| json!({"id": format!("row-{i}"), "parameters": p}))
+            .collect();
+        let lean: Value = serde_json::from_str(
+            &prepared
+                .scores_json(&Value::from(candidates).to_string(), budget)
+                .unwrap(),
+        )
+        .unwrap();
+        let matrix = prepared
+            .score_matrix(rows.len(), &rows.concat(), budget)
+            .unwrap();
+        let records = lean["records"].as_array().unwrap();
+        assert_eq!(records.len(), matrix.len());
+        for (record, row) in records.iter().zip(&matrix) {
+            assert_eq!(record["status"], row.status, "{budget}");
+            assert_eq!(record["steps"].as_u64(), Some(row.steps), "{budget}");
+            assert_eq!(
+                record["score"].as_f64().map(f64::to_bits),
+                row.score.map(f64::to_bits),
+                "{budget}"
+            );
+            assert_eq!(row.score.is_some(), row.status == "complete");
+        }
+    }
+
+    #[test]
+    fn score_matrix_matches_scores_json() {
+        let example = fixture();
+        let prepared = Prepared::new(&example["model"].to_string()).unwrap();
+        let mut rows: Vec<Vec<f64>> = (0..9)
+            .map(|i| vec![4.0 * (1.0 + f64::from(i) * 0.05), 2.0 - f64::from(i) * 0.1])
+            .collect();
+        rows.push(vec![-1.0, 2.0]);
+        rows.push(vec![1e6, 0.0]);
+        let cancel = std::env::temp_dir().join(format!("matrix-cancel-{}", std::process::id()));
+        std::fs::write(&cancel, b"").unwrap();
+        let cancel_budget = json!({"cancel_file": cancel}).to_string();
+        for budget in [
+            "{}",
+            r#"{"workers":4}"#,
+            r#"{"workers":3,"max_steps":30}"#,
+            r#"{"max_steps":1}"#,
+            r#"{"wall_ms":60000}"#,
+            &cancel_budget,
+        ] {
+            assert_matrix_matches_scores(&prepared, &rows, budget);
+        }
+        let cancelled = prepared.score_matrix(1, &rows[0], &cancel_budget).unwrap();
+        assert_eq!(
+            cancelled,
+            vec![MatrixScore {
+                status: "cancelled",
+                steps: 0,
+                score: None
+            }]
+        );
+        std::fs::remove_file(&cancel).unwrap();
+        assert_matrix_matches_scores(&prepared, &[vec![], vec![]], "{}");
+        let nan = prepared.score_matrix(1, &[f64::NAN, 1.0], "{}").unwrap();
+        assert_eq!(
+            (nan[0].status, nan[0].steps, nan[0].score),
+            ("invalid", 0, None)
+        );
+
+        let mut held = example["model"].clone();
+        held["control"] = json!({"kind": "held", "switches_s": [0.4, 1.1]});
+        let held = Prepared::new(&held.to_string()).unwrap();
+        let rows = [
+            vec![-1.0, -0.5, 0.0],
+            vec![3.0, 3.0, 3.0],
+            vec![5.0, 0.0, 0.0],
+            vec![0.5, 0.25, -0.25],
+        ];
+        for budget in ["{}", r#"{"workers":2}"#, r#"{"max_steps":20}"#] {
+            assert_matrix_matches_scores(&held, &rows, budget);
+        }
+        let statuses: Vec<_> = held
+            .score_matrix(4, &rows.concat(), "{}")
+            .unwrap()
+            .iter()
+            .map(|row| row.status)
+            .collect();
+        assert_eq!(statuses, ["complete", "infeasible", "invalid", "complete"]);
+    }
+
+    #[test]
+    fn score_matrix_rejects_bad_shapes_and_budgets() {
+        let example = fixture();
+        let prepared = Prepared::new(&example["model"].to_string()).unwrap();
+        assert!(prepared.score_matrix(0, &[], "{}").is_err());
+        assert!(prepared.score_matrix(4097, &[], "{}").is_err());
+        assert!(prepared.score_matrix(4096, &[], "{}").is_ok());
+        assert!(prepared.score_matrix(2, &[1.0, 2.0, 3.0], "{}").is_err());
+        assert!(prepared.score_matrix(1, &[1.0; 65], "{}").is_err());
+        assert!(prepared.score_matrix(1, &[1.0; 64], "{}").is_ok());
+        for budget in [
+            r#"{"workers":0}"#,
+            r#"{"max_steps":0}"#,
+            r#"{"wall_ms":0}"#,
+            "{",
+            r#"{"x":1}"#,
+        ] {
+            assert!(
+                prepared.score_matrix(1, &[4.0, 2.0], budget).is_err(),
+                "{budget}"
+            );
+        }
     }
 
     #[test]
