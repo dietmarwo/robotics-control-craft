@@ -128,3 +128,54 @@ check passes. Otherwise revert it and record it under `rejected/`.
 - Expected effect: one fewer thread spawn and join per batch; expect
   1.15x to 1.3x on `parallel`.
 - Floating-point results: unchanged.
+
+### Round 7: validated fast decoding of parameter arrays
+
+- Target workload: `invalid` (1,024 full records with 63 parameters
+  each, one worker), round 6 binary before, round 7 binary after, full
+  mode.
+- Profile after round 3 (`invalid`, callgrind): serde_json number
+  parsing about 45% (`parse_number`, `parse_integer`, the
+  `float_roundtrip` lexical path), sequence handling 15%, record
+  serialization most of the rest.
+- Change: decode candidate batches first with a twin of `Candidate`
+  whose `parameters` field is borrowed as a raw JSON slice, checked
+  against the strict JSON number-array grammar and parsed with
+  `str::parse::<f64>`. Both serde_json's `float_roundtrip` parser and
+  the standard library round correctly, so every finite value is the
+  same `f64`, including signed zeros and subnormals. If the fast decode
+  fails for any reason (other JSON, an infinite value, or any serde
+  error), the batch is decoded again with the original types, so
+  results and error messages are exactly the previous ones. The CLI
+  request path uses the same scheme.
+- Expected effect: 1.4x to 2x on `invalid`; smaller gains on lean and
+  full `serial`.
+- Floating-point results: unchanged (identical parsed values); unit
+  tests compare both decoders on edge cases and on 20,000 random bit
+  patterns in several notations.
+- Outcome: rejected at 0.955x (1.805 ms before, 1.890 ms after;
+  `rejected/attempt-fast-parameter-decoding-invalid.json`). The fast
+  path was taken, but the raw-slice scan plus `str::parse` costs more
+  instructions per short token than serde_json's own number parser. The
+  code was reverted; the next round reuses the number 7.
+
+### Round 7 (second attempt): AVX-512 lane kernel with sixteen lanes
+
+- Target workload: `domain` (48 full records, PD control, 4,000 RK4
+  steps each, one worker), round 6 binary before, round 7 binary after.
+- Diagnostics after round 3 (11-sample medians, informal): removing the
+  divisions saved only 8%, and AVX-512 with eight lanes (one register
+  per quantity, one dependency chain) matched AVX2 with eight lanes (two
+  chains). The kernel is bound by the step's dependency-chain latency.
+  AVX-512 with sixteen lanes keeps two chains of eight in 32 registers;
+  an informal build measured 1.25x on `domain` against round 6.
+- Change: make the lane kernel generic over its width. On hosts with
+  AVX-512F, preparation selects a sixteen-lane build compiled with
+  `avx512f`; otherwise eight lanes with AVX2 or the baseline build. The
+  engine groups and distributes work in ranges of the selected width.
+  Rust does not contract multiplies and adds even though `avx512f`
+  implies FMA support, so lanes perform the same IEEE operations.
+- Expected effect: 1.15x to 1.3x on `domain`; batches smaller than
+  sixteen run as padded groups.
+- Floating-point results: bit-identical; a unit test compares the
+  AVX-512, AVX2 and baseline kernels bit for bit.

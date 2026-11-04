@@ -289,8 +289,9 @@ impl Prepared {
     /// Emit the classified outcome of every row in `range`, keyed by row index.
     ///
     /// Without a deadline or cancel file, untraced rows whose parameters pass the
-    /// domain check are integrated `domain::LANES` at a time in lockstep. Traced
-    /// rows, monitored budgets and a single leftover row use the scalar kernel.
+    /// domain check are integrated `domain::lane_width` at a time in lockstep.
+    /// Traced rows, monitored budgets and a single leftover row use the scalar
+    /// kernel.
     fn outcomes<'p>(
         &self,
         range: Range<usize>,
@@ -301,7 +302,8 @@ impl Prepared {
         mut emit: impl FnMut(usize, Evaluation, u64),
     ) {
         let lockstep = deadline.is_none() && budget.cancel_file.is_none();
-        let mut group = [0usize; domain::LANES];
+        let width = domain::lane_width(&self.model);
+        let mut group = [0usize; domain::MAX_LANES];
         let mut filled = 0;
         for index in range {
             let (parameters, trace) = row(index);
@@ -317,8 +319,8 @@ impl Prepared {
             }
             group[filled] = index;
             filled += 1;
-            if filled == domain::LANES {
-                self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit);
+            if filled == width {
+                self.lanes(&group[..filled], &row, budget, metrics_enabled, &mut emit);
                 filled = 0;
             }
         }
@@ -329,21 +331,23 @@ impl Prepared {
                     self.outcome(row(group[0]).0, false, budget, None, metrics_enabled);
                 emit(group[0], result, steps);
             }
-            _ => self.lanes(&group, filled, &row, budget, metrics_enabled, &mut emit),
+            _ => self.lanes(&group[..filled], &row, budget, metrics_enabled, &mut emit),
         }
     }
 
-    /// Integrate the first `filled` rows of `group` in lockstep, padding unused lanes.
+    /// Integrate the rows of `group` in lockstep.
     fn lanes<'p>(
         &self,
-        group: &[usize; domain::LANES],
-        filled: usize,
+        group: &[usize],
         row: &impl Fn(usize) -> (&'p [f64], bool),
         budget: &Budget,
         metrics_enabled: bool,
         emit: &mut impl FnMut(usize, Evaluation, u64),
     ) {
-        let parameters = std::array::from_fn(|lane| row(group[lane.min(filled - 1)]).0);
+        let mut parameters: [&[f64]; domain::MAX_LANES] = [&[]; domain::MAX_LANES];
+        for (slot, &index) in parameters.iter_mut().zip(group) {
+            *slot = row(index).0;
+        }
         let mut work = Work {
             budget,
             deadline: None,
@@ -351,10 +355,12 @@ impl Prepared {
             metrics_enabled,
             monitored: false,
         };
-        let results = domain::evaluate_lanes(&self.model, parameters, &mut work);
-        for (lane, (result, steps)) in results.into_iter().enumerate().take(filled) {
-            emit(group[lane], finite_objective(result), steps);
-        }
+        domain::evaluate_lanes(
+            &self.model,
+            &parameters[..group.len()],
+            &mut work,
+            |lane, result, steps| emit(group[lane], finite_objective(result), steps),
+        );
     }
 
     fn record<'a>(
@@ -390,7 +396,7 @@ impl Prepared {
 
     /// Produce one item per index in index order. `fill` emits the items of an
     /// index range; it runs inline, or on the calling thread plus scoped workers
-    /// that claim ranges of `domain::LANES` indexes.
+    /// that claim ranges of one lockstep group width.
     fn dispatch<T: Send + Sync>(
         &self,
         count: usize,
@@ -405,7 +411,7 @@ impl Prepared {
                 .map(|item| item.expect("missing evaluation"))
                 .collect();
         }
-        let chunk = domain::LANES;
+        let chunk = domain::lane_width(&self.model);
         let next = AtomicUsize::new(0);
         let slots: Vec<_> = (0..count).map(|_| OnceLock::new()).collect();
         let claim = || {
@@ -797,6 +803,14 @@ mod tests {
             json!([25.0, 0.1]),
             json!([12.0, 0.2]),
             json!([3.0, 0.0]),
+            json!([5.0, 2.5]),
+            json!([15.0, 0.3]),
+            json!([0.5, 0.5]),
+            json!([7.5, 1.0]),
+            json!([30.0, 0.05]),
+            json!([1.0, 4.0]),
+            json!([20.0, 0.0]),
+            json!([8.0, 2.0]),
         ];
         assert_lanes_match_scalar(&pd, &rows, json!({}));
         assert_lanes_match_scalar(&pd, &rows, json!({"max_steps": 30}));
@@ -816,6 +830,14 @@ mod tests {
             json!([-0.5, 0.5, 2.0]),
             json!([2.9, 2.9, 2.9]),
             json!([0.1, 0.2, 0.3]),
+            json!([1.5, -1.5, 1.0]),
+            json!([2.0, 2.0, 2.0]),
+            json!([-2.5, 0.0, 2.5]),
+            json!([0.0, 3.0, 0.0]),
+            json!([3.0, -3.0, 1.9]),
+            json!([0.7, 0.7, 0.7]),
+            json!([-1.0, 1.0, -1.0]),
+            json!([2.2, 1.1, 0.0]),
         ];
         assert_lanes_match_scalar(&held, &rows, json!({}));
         assert_lanes_match_scalar(&held, &rows, json!({"max_steps": 20}));
