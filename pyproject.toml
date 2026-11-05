@@ -6,7 +6,11 @@ build-backend = "maturin"
 name = "robotics-control-craft"
 version = "0.3.0"
 requires-python = ">=3.10"
-description = "Prepared robotics-control-craft research evaluations"
+description = "Python API for a Rust control evaluator: mass-spring-damper rollouts with held-force schedules and sampled saturated PD controllers"
+keywords = ["control systems", "optimal control", "PD controller", "mass-spring-damper", "robotics", "simulation", "optimization", "Rust"]
+
+[project.urls]
+Repository = "https://github.com/dietmarwo/robotics-control-craft"
 
 [tool.maturin]
 module-name = "robotics_control_craft._native"
