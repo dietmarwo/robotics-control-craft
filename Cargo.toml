@@ -3,8 +3,11 @@ name = "robotics-control-craft"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Bounded robotics-control-craft research evaluator"
+description = "Control evaluator: mass-spring-damper rollouts with held-force schedules and sampled saturated PD controllers for control optimization"
 license = "MIT"
+repository = "https://github.com/dietmarwo/robotics-control-craft"
+keywords = ["control", "optimal-control", "pd-controller", "robotics", "simulation"]
+categories = ["science::robotics", "simulation"]
 # Package sources, docs, models, validation scripts and the release evidence
 # that the source distribution has always carried; not the build artifacts,
 # patch series or performance evidence of the release ZIP.
