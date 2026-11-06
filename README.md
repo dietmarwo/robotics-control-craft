@@ -2,6 +2,8 @@
 
 # robotics-control-craft 0.3.0
 
+> **One of 18 related repositories.** The [repository overview](https://github.com/dietmarwo/fcmaes-rust/blob/main/docs/repositories.md) shows what each one does and how they connect.
+
 A bounded research evaluator. See the [model card](docs/model.md) for units,
 equations and supported behavior and the [user manual](docs/user-manual.md)
 for the complete model and API reference with runnable examples. The
