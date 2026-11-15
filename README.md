@@ -67,6 +67,11 @@ maturin sdist --out dist
 maturin build --release --locked --out dist
 ```
 
+Every push and pull request runs the first three commands, a check of
+`SHA256SUMS`, the packaged wheel and the Markdown links through the
+[workflow shared by the five evaluators](https://github.com/dietmarwo/optimization-jobs/blob/main/docs/shared-workflows.md#evaluator-checks).
+A new or changed tracked file needs its line in `SHA256SUMS`.
+
 Independent numerical scripts use Python 3.12. The oscillator oracle uses
 NumPy 2.3.5 and SciPy 1.17.0. The optional
 `validation/optimize.py robotics_control_craft` demonstrates an in-process SciPy DE objective.
